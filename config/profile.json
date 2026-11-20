@@ -1,0 +1,33 @@
+{
+  "nodes": 100,
+  "links": 200,
+  "officialScenario": "sce20261012-conf01/sce03",
+  "script": "01",
+  "start": 166,
+  "end": 200,
+  "drain": 60,
+  "exampleServices": [
+    "BGV0001",
+    "BGV0002",
+    "BGV0003"
+  ],
+  "control": {
+    "control_primary_link": "L00088",
+    "control_backup_link": "L00089"
+  },
+  "horizonSeconds": 4200,
+  "pins": {
+    "bg-service.json": "55f19f9f9fd2fef799f2ce550bde018a742df7e2d3149eb83ff21d377d4c64c6",
+    "net-topo.json": "9a77b84d9283362b4864e97c19394a5f07c9f64432d81b4c856bd0cd85b0d9fb",
+    "scripts/script-01.json": "50698a3dce52f55631089e1aee9dded9997dc527677e86744797be77576f8454",
+    "scripts/script-02.json": "73e17edfc372d169b512cfaeb0a287dea514dddb9033b67d94413de817fb9deb",
+    "scripts/script-03.json": "f4ce5f8108a9333305aa4ecff94d8b0b52a429c14793a2ce6dc8e08171572da8",
+    "scripts/script-04.json": "76144c10cf0fc4a551c0f62442f63ca8ba4b799caa38e2d0e9932eeeaf982338",
+    "scripts/script-05.json": "f4911c9a42184a74f5acf9c02e3b993ca075fb7e88005875d265d80b4888e91d",
+    "scripts/script-06.json": "925565be9077d26fb0772ea8da1d5784e6b6dd592bd9be771cedc01afa8f4a7a",
+    "scripts/script-07.json": "48a22c74a7300aee6ff7cd1a5d438c354f013f5a869af2e140eb3123e4f1927e",
+    "scripts/script-08.json": "fa2b38ea7740f3b18ba7a282673e7272549bdf126574450c3f35e7957f41ef83",
+    "scripts/script-09.json": "47f5a94ad2b5873985c50d690e8139ed35e9a89ea4fa60067416522e519f5147",
+    "scripts/script-10.json": "0d7a38bed351947af3029e844a96566a6607afde05ac3eac0afba811ac054ad5"
+  }
+}

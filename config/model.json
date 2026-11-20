@@ -1,0 +1,52 @@
+{
+  "format": "native-full-parameters",
+  "architecture": {
+    "model_type": "qwen2",
+    "vocab_size": 151936,
+    "hidden_size": 1536,
+    "num_hidden_layers": 28,
+    "num_attention_heads": 12,
+    "num_key_value_heads": 2
+  },
+  "tokenizerSha256": {
+    "merges.txt": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3",
+    "tokenizer_config.json": "5b5d4f65d0acd3b2d56a35b56d374a36cbc1c8fa5cf3b3febbbfabf22f359583",
+    "tokenizer.json": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539",
+    "vocab.json": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+    "config.json": "f77f3ee539bd9831ec718ee5b68655c08f3a9436a831e7a1fdec06cf5286814e"
+  },
+  "tokenLimit": 32768,
+  "symbols": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L"
+  ],
+  "version": 372,
+  "actionDescriptions": "Select one authorized tool using the ID and semantic fields in actionCatalog.",
+  "nativeVersions": {
+    "196": {
+      "checkpointSha256": "83436ce0275085b8704a098c04a1256642644237086cbec3861f4124cbf503d8",
+      "metadataSha256": "997ed3ef617e072fe8c8d5fb03bfdd3c525a8fc2f543baee654df1df9283a323",
+      "role": "retained-historical-best"
+    },
+    "372": {
+      "checkpointSha256": "1c5060bdbd111741eab568b09c6945a176148ac4b34d4e68d477d64b29211fa9",
+      "metadataSha256": "b8e3cdcd5a117013a2ada077b1415b6531de2d792aa4504777627623456341b0",
+      "role": "last-promoted"
+    },
+    "374": {
+      "checkpointSha256": "f7a3e69ce38167286c49e0a8c97c65c334777b155cb5f480b0f38a511dde0c48",
+      "metadataSha256": "f5bc1241070315d980a90ab71139770f579723946cba54d8fa063e8b81b20efc",
+      "role": "last-trained"
+    }
+  }
+}
