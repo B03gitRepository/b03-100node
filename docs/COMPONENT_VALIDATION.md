@@ -1,4 +1,6 @@
-# Component work-order regression
+# Archived component work-order regression
+
+Historical public commit [21bf72c](https://github.com/B03gitRepository/b03-100node/commit/21bf72cd4f3e3931dabceb5ed453f6ad956f4135) provides the interfaces and examples measured below. Current opening work orders query K044 when authorized unmet demand is present.
 
 The accepted parent and four component configurations ran on the same pinned simulator, official input bytes, write scope, seed and measured window. Each row is an actual work-order run. The model rows used frozen parameters.
 
