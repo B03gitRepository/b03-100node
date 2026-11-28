@@ -136,9 +136,43 @@ def update(parameters, examples, *, epochs=4, learning_rate=0.16, clip=0.15):
         weights = [w + learning_rate*g for w,g in zip(weights,grad,strict=True)]
         history.append({"epoch":epoch+1,"meanClippedObjective":surrogate/len(examples),
                         "gradientNorm":math.sqrt(math.fsum(v*v for v in grad))})
+        if epoch == 0:
+            history[-1]["gradientByFeature"] = dict(zip(FEATURES, grad, strict=True))
     if weights == parameters["weights"]:
         raise ValueError("Policy parameters did not change")
     return {**parameters,"version":parameters["version"]+1,"weights":weights}, history
+
+
+def feature_evidence(before, after, examples, gradients):
+    """Describe when each feature could influence the observed two-tool update."""
+    evidence = {}
+    for index, name in enumerate(FEATURES):
+        seen = {symbol: 0 for symbol in before["symbols"]}
+        informative = dict(seen)
+        for x, action, _old, legal, advantage in examples:
+            if len(legal) == 2 and x[index] != 0:
+                seen[action] += 1
+                if advantage != 0:
+                    informative[action] += 1
+        evidence[name] = {"presentBothLegalByAction": seen,
+                          "nonzeroAdvantageByAction": informative,
+                          "firstEpochNetGradient": gradients[name],
+                          "weightBefore": before["weights"][index],
+                          "weightAfter": after["weights"][index]}
+    return evidence
+
+
+def matched_observations(episodes):
+    """Count different sampled actions at an identical observed state and paired conditions."""
+    states = defaultdict(lambda: defaultdict(set))
+    for episode in episodes:
+        for step in episode["result"]["steps"]:
+            obs = step["observation"]
+            key = (episode["key"], evidence_digest(obs))
+            states[key][step["action"]].add(remaining(episode, obs["timeNs"]))
+    diverse = [returns for returns in states.values() if len(returns) > 1]
+    return {"statesWithBothActions": len(diverse),
+            "statesWithDifferentRemainingU": sum(len(set.union(*rows.values())) > 1 for rows in diverse)}
 
 
 def main():
@@ -164,4 +198,6 @@ def main():
             "scoredDecisions":len(ep["result"]["steps"]),"U":ep["result"]["unmetServiceNs"]/1e9}
             for ep in episodes],"samples":len(examples),"epochs":history,"oldSha256":evidence_digest(before),
             "newSha256":evidence_digest(after),"parameterVersion":after["version"]}
+    report["featureEvidence"] = feature_evidence(before, after, examples, history[0]["gradientByFeature"])
+    report["matchedObservations"] = matched_observations(episodes)
     args.report.write_text(json.dumps(report,indent=2,allow_nan=False)+"\n",encoding="utf-8")
