@@ -27,15 +27,15 @@ OM 用已送达且可用的链路报告计算相对开局降速的链路，用�
 注册 `model.options.acceptNetworkFoundation` 的模型实现 `set_network_foundation(catalog)`，在开局接收一次底图。每次 `choose` 接收 `networkReference`，其中包括目录摘要、降速链路与新增业务列表。示例选择器使用 B（优先级贪心）和 I（有界局部调整），由规则组件生成配置。训练通过已核验工单的未加权业务秒更新策略，加权指标 W 单独评价。
 
 ```sh
-python collab/model/train_foundation.py init --output checkpoints/v0
-python run.py run --data "$B03_DATA" --script 04 --foundation --policy model --components config/foundation-sample.json --checkpoint checkpoints/v0 --device cpu --output runs/draw-1
+python collab/model/train_foundation.py init --output models/foundation/v0
+python run.py run --data "$B03_DATA" --script 04 --foundation --policy model --components config/foundation-sample.json --checkpoint models/foundation/v0 --device cpu --output runs/draw-1
 ```
 
 为同一工况提供至少两个独立采样种子。可在另一个 JSON 组件清单中继承 `config/foundation-sample.json`，把 `model.options.drawSeed` 设为另一个整数，用该清单对相同的脚本、窗口和业务再次执行上面的命令，输出至 `runs/draw-2`。组件清单中的 `extends` 按自身所在目录解析。每一批使用一个起始检查点，下一批从更新后的检查点重新采样。
 
 ```sh
-python collab/model/train_foundation.py update --checkpoint checkpoints/v0 --output checkpoints/v1 --report runs/update-1.json runs/draw-1 runs/draw-2
-python run.py run --data "$B03_DATA" --foundation --policy model --components config/foundation-selector.json --checkpoint checkpoints/v1 --device cpu --output runs/selector
+python collab/model/train_foundation.py update --checkpoint models/foundation/v0 --output models/foundation/v1 --report runs/update-1.json runs/draw-1 runs/draw-2
+python run.py run --data "$B03_DATA" --foundation --policy model --components config/foundation-selector.json --checkpoint models/foundation/v1 --device cpu --output runs/selector
 python run.py verify runs/selector
 ```
 

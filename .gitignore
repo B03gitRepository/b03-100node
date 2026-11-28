@@ -8,6 +8,7 @@ runs/
 artifacts/
 data/
 models/
+checkpoints/
 external/
 *.pt
 *.pth
