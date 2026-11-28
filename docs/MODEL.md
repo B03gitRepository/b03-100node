@@ -33,6 +33,10 @@ python run.py examples RUN --components config/example-model.json
 
 输出的 `model.input` 和 `model.output` 分别为实际观测和决策，附工单标识与时间。运行方在本地提供赛事输入。
 
+## 底图选择器的训练回执
+
+使用 `src/foundation_training.py` 更新 B/I 选择器时，`featureEvidence` 按特征记录两种工具均合法时各自被采样的次数、非零优势次数、首轮净梯度和更新前后的权重。`matchedObservations` 先匹配整套工况与模型可见观测，再统计采到两种动作的状态。其中 `statesWithDifferentRemainingU` 表示样本里的剩余 U 有波动，`statesWithNonoverlappingActionRanges` 表示按动作分组后，实测剩余 U 的区间彼此分离。要归因于某次选择，还需核对原生快照、写权限、配置读回，以及下一次决策前的业务秒。
+
 ## 在线 PPO 契约
 
 按已送达合法动作上的实际行为分布采样。返回所选工具的 `policyVersion`、完整 `behaviorProbabilities` 和大于零的 `behaviorProbability`。若有合法集上的 softmax，可另存为 `legalProbabilities`。若提供 `oldLogProbability`，其值必须等于所选行为概率的自然对数。

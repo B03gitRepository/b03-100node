@@ -34,6 +34,9 @@ class FoundationTrainingSignalTest(unittest.TestCase):
                                "steps": [{"observation": obs, "action": action}]}}
         pairs = [episode("a", "B", 4, 1), episode("a", "I", 2, 1),
                  episode("a", "B", 3, 2), episode("a", "I", 3, 2),
-                 episode("a", "B", 1, 3), episode("b", "I", 2, 3)]
+                 episode("a", "B", 1, 3), episode("b", "I", 2, 3),
+                 episode("a", "B", 2, 4), episode("a", "B", 5, 4),
+                 episode("a", "I", 2, 4), episode("a", "I", 5, 4)]
         self.assertEqual(matched_observations(pairs),
-                         {"statesWithBothActions": 2, "statesWithDifferentRemainingU": 1})
+                         {"statesWithBothActions": 3, "statesWithDifferentRemainingU": 2,
+                          "statesWithNonoverlappingActionRanges": 1})

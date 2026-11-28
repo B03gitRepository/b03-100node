@@ -171,8 +171,14 @@ def matched_observations(episodes):
             key = (episode["key"], evidence_digest(obs))
             states[key][step["action"]].add(remaining(episode, obs["timeNs"]))
     diverse = [returns for returns in states.values() if len(returns) > 1]
+    separated = 0
+    for returns in diverse:
+        ranges = sorted((min(values), max(values)) for values in returns.values())
+        if all(left[1] < right[0] for left, right in zip(ranges, ranges[1:])):
+            separated += 1
     return {"statesWithBothActions": len(diverse),
-            "statesWithDifferentRemainingU": sum(len(set.union(*rows.values())) > 1 for rows in diverse)}
+            "statesWithDifferentRemainingU": sum(len(set.union(*rows.values())) > 1 for rows in diverse),
+            "statesWithNonoverlappingActionRanges": separated}
 
 
 def main():
