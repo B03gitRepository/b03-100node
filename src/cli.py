@@ -80,7 +80,7 @@ def main(argv=None, *, on_policy_ready=None):
     run.add_argument("--simulator", help="只读 resnet_py 仿真引擎目录（默认优先取 B03_SIMULATOR，否则用仓内 simulator/resnet_py）")
     source = run.add_mutually_exclusive_group()
     source.add_argument("--data", type=Path, help="官方数据集压缩包、解压根目录或具体场景目录")
-    source.add_argument("--scenario", type=Path, metavar="MANIFEST", help="自建场景清单文件（network.json / manifest.json）")
+    source.add_argument("--scenario", type=Path, metavar="MANIFEST", help="按清单文件运行时，可在仓库根目录使用 --scenario knowledge/scenarios/field-survey/manifest.json 加载场景，也可用 --network field-survey 按名称运行")
     source.add_argument("--network", metavar="ID", help="选用 knowledge/scenarios 下的内置合成网络名称")
     run.add_argument("--foundation", action="store_true",
                      help="为官方运行归档并向 OM/RC/模型共享 0 秒开局静态底图（自建场景默认自动启用）")
