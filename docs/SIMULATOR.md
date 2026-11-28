@@ -95,3 +95,9 @@ python run.py verify runs/legacy-cleanup
 ```sh
 python run.py verify runs/official --require-complete-drain --report runs/official-verified.json
 ```
+
+## 工单下发前的只读配置查询
+
+当多条业务同时需要重新确认原配置时，控制器分别向各业务当前代次的整条路径发送只读查询。同一业务的所有回包须在有效期内，符合最近已送达的设备版本和需求。证据齐全会触发下一次 OM/RC 授权。查询结果本身不能停源、归还带宽或签收工单。已发出的其他业务查询可在各自期限内继续，缺失端口有新鲜可达证据或重试时间到达后可以再查。配置写入、联合部署终验和整单 OM 签收仍走原分组通道。
+
+新回执的 `verification.independentConfigurationRefresh` 记录已发起、匹配、未确认和待回包的业务查询次数。`drainStatus.unresolvedConfigurationRefreshes` 给出尚无结论的业务、代次、工单和缺失节点。`pendingReleaseIds` 单列待释放义务，`awaitingOmReleaseIds` 单列已取得设备读回、尚待 OM 签收的业务。

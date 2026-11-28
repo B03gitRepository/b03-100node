@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 
 from packet_device_readback import phase_matches
+from packet_refresh_evidence import CONTRACT as REFRESH_CONTRACT, refresh_obligation
 
 
 CONTRACT = "b03.bounded-drain.v1"
@@ -36,7 +37,11 @@ def drain_receipt(conditions, clock, controller, actions):
     reads = {}
     awaiting_signoff = {}
     release_count = 0
+    independent = conditions.get("configurationRefreshContract") == REFRESH_CONTRACT
+    refreshes = {}
     for row in actions:
+        if independent:
+            refresh_obligation(refreshes, row)
         event = row["event"]
         if row.get("time_ns", 0) > stop:
             raise ValueError("A work-order receipt exceeds the configured drain deadline")
@@ -95,6 +100,7 @@ def drain_receipt(conditions, clock, controller, actions):
     protected = set(conditions["authority"].get("protectedServiceIds", ()))
     allowed = set(conditions["authority"]["allowedServiceIds"]) - protected
     due = {sid for sid, _ in release_intent | sent_release}.union(*open_orders.values())
+    refresh_ids = {sid for sid, _ in refreshes}
     active, unknown, outside = [], [], []
     for sid in sorted(installed):
         sample = demand.get(sid)
@@ -107,15 +113,20 @@ def drain_receipt(conditions, clock, controller, actions):
         elif sample["registered"] and sample["active"] and sample["observed_at_ns"] < end:
             unknown.append(sid)
         elif sample["registered"] and sample["active"]:
-            active.append(sid)
+            if sid not in refresh_ids:
+                active.append(sid)
         else:
             due.add(sid)
-    pending = bool(due or unknown or open_orders or parked or awaiting_signoff)
+    pending = bool(due or unknown or open_orders or parked or awaiting_signoff or refreshes)
+    observers = [{"serviceId": v["serviceId"], "epoch": v["epoch"], "workId": v["workId"], "planId": v["planId"],
+                  "state": v["state"], "missingNodes": sorted(set(v["nodes"]) - v["received"])}
+                 for _, v in sorted(refreshes.items())]
     return {"contractVersion": CONTRACT, "status": "incomplete" if pending else "complete",
             "scoreEndNs": end, "deadlineNs": stop, "confirmedDeviceReleases": release_count,
             "pendingReleaseIds": sorted(due), "pendingWorkIds": sorted(open_orders),
             "unconfirmedDeviceEpochs": [{"serviceId": sid, "epoch": epoch} for sid, epoch in sorted(sent_release)],
             "parkedReleaseIds": sorted(parked.values()), "awaitingOmReleaseIds": sorted({sid for _, sid in awaiting_signoff}),
+            **({"unresolvedConfigurationRefreshes": observers} if independent else {}),
             "continuingActiveIds": active,
             "unresolvedDemandIds": unknown, "outsideWriteAuthorityIds": outside}
 

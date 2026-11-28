@@ -348,6 +348,10 @@ def verify(run, *, strict_source=False, components=None, checkpoint=None, tokeni
             latency[kind].append(pk["time_ns"]-pk["created_at_ns"])
     from lifecycle_evidence import check_lifecycle
     lifecycle = check_lifecycle(plans, acts, demand_index, cond, probe_index)
+    from packet_refresh_evidence import verify_refresh
+    refresh = verify_refresh(cond, clocks, ct, acts)
+    if refresh is not None:
+        verification["independentConfigurationRefresh"] = refresh
     from drain_evidence import verify_drain
     drain = verify_drain(cond, summary, ct, acts, lines(run / "packets-control.jsonl"))
     if drain is not None:

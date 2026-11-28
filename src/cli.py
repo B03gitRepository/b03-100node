@@ -303,6 +303,8 @@ def main(argv=None, *, on_policy_ready=None):
                 "coldStart": args.start != 0, "match": "same input bytes, reporting, start/end/drain, clocks, eligible IDs, full demand, physical queues and seed"}
     if args.mode == "workorder":
         from drain_evidence import CONTRACT as drain_contract
+        from packet_refresh_evidence import CONTRACT as refresh_contract
+        identity["configurationRefreshContract"] = refresh_contract
         identity["drainContract"] = drain_contract
         identity["knowledgeBindingContract"] = BINDING_CONTRACT
         identity["deviceRecovery"] = {"contractVersion": ("b03.deferred-cleanup.v2" if args.defer_unreachable_cleanup

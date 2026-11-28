@@ -13,6 +13,7 @@ from inspect import Parameter, signature
 
 from resnet_bridge import ControlLoop, is_active_demand, validate_install_choice
 from destination_guard import offline_node_signature, port_witness
+from packet_refresh import IndependentRefresh
 
 from packet_device_readback import (
     ack_identity, operation_matches, phase_matches, query_receipt, refresh_matches, status_time,
@@ -32,6 +33,7 @@ class WorkLoop(ControlLoop):
         self.last_result = None
         self.last_verified = None
         self.refresh_blocks = {}
+        self.independent_refresh = IndependentRefresh(self)
         self.defer_unreachable_cleanup = defer_unreachable_cleanup
         self.deferred_cleanups = {}
         self.refresh_completed = 0
@@ -54,7 +56,7 @@ class WorkLoop(ControlLoop):
         self.emit({"event": event, "time_ns": now, "work_id": self.work["work_id"] if self.work else None, **fields})
 
     def _log(self, row):
-        if self.work and "plan_id" in row:
+        if self.work and "plan_id" in row and "work_id" not in row:
             # Native plans are numbered per service; all their wire IDs carry this joint work ID.
             row = dict(row, work_id=self.work["work_id"], plan_id=self.native_plan_id)
         self.native_log(row)
@@ -68,11 +70,13 @@ class WorkLoop(ControlLoop):
                 self.transaction["cleanup_query_timeout"] = (original["command_id"], query["command_id"])
         if row["event"] in {"transaction", "command_timeout"}:
             self._event("native_" + row["event"], row["time_ns"], **{
-                key: value for key, value in row.items() if key not in {"event", "time_ns", "work_id"}
+                key: value for key, value in row.items() if key not in {"event", "time_ns"}
             })
 
-    def _send(self, command, retry=False):
-        self._event("device_command", self.now_ns, plan_id=command["plan_id"], command_id=command["command_id"],
+    def _send(self, command, retry=False, *, work_id=None):
+        if command["action"]["op"] != "query":
+            self.independent_refresh.cancel(command["action"]["service_id"], self.now_ns, "device_write")
+        self._event("device_command", self.now_ns, **({"work_id": work_id} if work_id is not None else {}), plan_id=command["plan_id"], command_id=command["command_id"],
                     service_id=command["action"]["service_id"], epoch=command["action"]["epoch"],
                     op=command["action"]["op"], node_id=command["target_node_id"], retry=retry,
                     issued_at_ns=command["issued_at_ns"], base_version=command["base_version"],
@@ -318,6 +322,7 @@ class WorkLoop(ControlLoop):
                                        source_stop_confirmed=item["transaction"]["source_confirmed"],
                                        retained_links=item["links"])
                                   for wid, item in self.deferred_cleanups.items()],
+            "pending_configuration_refresh_ids": sorted(self.independent_refresh.jobs),
             "current_work_id": work["work_id"] if work else None, "remaining_operations": list(work["queue"]) if work else [],
             "independent_queries_pending": wait, "pending_native_command": deepcopy(self.pending),
             "transaction_phase": self.transaction["status"] if self.transaction else None,
@@ -405,6 +410,8 @@ class WorkLoop(ControlLoop):
 
     def tick(self, now):
         self.now_ns = now
+        if self.independent_refresh.jobs or self.independent_refresh.retry_at:
+            self.independent_refresh.poll(now)
         if self.defer_unreachable_cleanup:
             self._defer_expired_cleanup(now)
         if self.readout is not None:
@@ -471,7 +478,8 @@ class WorkLoop(ControlLoop):
                 or not isinstance(plan.get("work_id"), str) or not plan["work_id"]
                 or set(ids).intersection(set(plan.get("release_ids", ())) | set(plan.get("install_ids", ())))):
             raise ValueError("invalid_read_only_configuration_scope")
-        unknown = [sid for sid in ids if self.refresh_blocks.get(sid) != self._refresh_key(sid, links, demands)]
+        unknown = [sid for sid in ids if sid not in self.independent_refresh.jobs
+                   and self.refresh_blocks.get(sid) != self._refresh_key(sid, links, demands)]
         if not unknown:
             self._event("config_refresh_deferred", now, work_id=plan["work_id"], service_ids=ids,
                         reason="same_unresolved_device_evidence", retained_wire_bps=self.budgets())
@@ -497,8 +505,14 @@ class WorkLoop(ControlLoop):
             if inside_order:
                 self.work["native_plan_ids"].append(plan_id)
             targets[sid] = {"plan_id": plan_id, "decision": record["decision"], "epoch": record["epoch"]}
+        if not inside_order:
+            self.independent_refresh.start(now, self.work["work_id"], targets)
+            self.work, self.native_plan_id = None, None
+            return
+        for sid in targets:
+            self.independent_refresh.cancel(sid, now, "dispatch_recheck")
         self._start_readout(now, "config_refresh", final_targets=targets)
-        self.readout["inside_order"] = inside_order
+        self.readout["inside_order"] = True
 
     def _advance_work(self, now):
         work = self.work
@@ -676,11 +690,12 @@ class WorkLoop(ControlLoop):
             "action": {"op": "query", "service_id": target["decision"]["service_id"], "epoch": target["epoch"]},
         }
 
-    def _schedule_query(self, now, key):
+    def _schedule_query(self, now, key, batch=None):
+        batch = self.readout if batch is None else batch
         sid, node = key
-        command = self._new_query(now, node, self.readout["targets"][sid])
-        self.readout["waiting"][key] = {"command": command, "retries": 0, "sent_at_ns": now}
-        self._send(command)
+        command = self._new_query(now, node, batch["targets"][sid])
+        batch["waiting"][key] = {"command": command, "retries": 0, "sent_at_ns": now}
+        self._send(command, work_id=batch["work_id"])
 
     def _start_readout(self, now, phase, *, final_targets=None):
         if final_targets is None:
@@ -689,7 +704,7 @@ class WorkLoop(ControlLoop):
             targets = {tr["decision"]["service_id"]: tr}
         else:
             targets = final_targets
-        self.readout = {"phase": phase, "waiting": {}, "received": {}, "targets": targets,
+        self.readout = {"work_id": self.work["work_id"], "phase": phase, "waiting": {}, "received": {}, "targets": targets,
                         "joint_refresh": final_targets is not None, "started_at_ns": now}
         # All requested devices, including source and terminal, reply independently in-band.
         for sid, target in targets.items():
@@ -705,26 +720,29 @@ class WorkLoop(ControlLoop):
                 and now >= self.readout["started_at_ns"] + self.config["transaction_timeout_ns"]):
             self._finish_configuration_refresh(now)
             return
-        for key, item in list(self.readout["waiting"].items()):
+        self._poll_query_waiters(self.readout, now)
+
+    def _poll_query_waiters(self, batch, now):
+        wid = batch["work_id"]
+        for key, item in list(batch["waiting"].items()):
             cmd = item["command"]
             if cmd is None:
                 if now >= item["resume_at_ns"]:
-                    self._schedule_query(now, key)
+                    self._schedule_query(now, key, batch)
                 continue
             if now - item["sent_at_ns"] < self.config["ack_wait_ns"]:
                 continue
             if item["retries"] < self.config["max_retries"] and now <= cmd["issued_at_ns"] + cmd["validity_ns"]:
                 item.update(retries=item["retries"] + 1, sent_at_ns=now)
-                self._send(cmd, retry=True)
+                self._send(cmd, retry=True, work_id=wid)
             else:
-                self._log({"event": "command_timeout", "time_ns": now, "command_id": cmd["command_id"],
+                self._log({"event": "command_timeout", "work_id": wid, "time_ns": now, "command_id": cmd["command_id"],
                            "plan_id": cmd["plan_id"], "state": "unknown", "operation": "query"})
                 item.update(command=None, resume_at_ns=now + self.config["query_interval_ns"])
-                self._event("budget_hold", now, reason="independent_query_timeout", node_id=key[1],
+                self._event("budget_hold", now, work_id=wid, reason="independent_query_timeout", node_id=key[1],
                             service_id=cmd["action"]["service_id"], retained_wire_bps=self.budgets())
 
-    def _readout_ack(self, ack, now, node):
-        batch = self.readout
+    def _accept_readout(self, batch, ack, now, node):
         sample = ack.get("b03_readback")
         if not isinstance(sample, dict) or not isinstance(sample.get("service_id"), str):
             return
@@ -733,7 +751,7 @@ class WorkLoop(ControlLoop):
         if not item or not item["command"]:
             return
         target = batch["targets"][key[0]]
-        receipt = query_receipt(ack, item["command"], node, now, self.work["work_id"],
+        receipt = query_receipt(ack, item["command"], node, now, batch["work_id"],
                                 batch["phase"], self.config["observation_ttl_ns"])
         if receipt is None or receipt["version"] < self.versions.get(node, 0):
             return
@@ -746,10 +764,17 @@ class WorkLoop(ControlLoop):
         batch["received"][key] = receipt
         del batch["waiting"][key]
         self._event("device_readback", now, **receipt, joint_refresh=batch["joint_refresh"])
-        if batch["waiting"]:
+        return True
+
+    def _readout_ack(self, ack, now, node):
+        batch = self.readout
+        if not self._accept_readout(batch, ack, now, node) or batch["waiting"]:
             return
         # Do not join an early, expired sample with a later reply and call it fresh.
-        stale = [nid for nid, row in batch["received"].items() if now - row["observed_at_ns"] > self.config["observation_ttl_ns"]]
+        self._snapshots(now)
+        stale = [key for key, row in batch["received"].items()
+                 if now - row["observed_at_ns"] > self.config["observation_ttl_ns"]
+                 or row["version"] < self.versions.get(key[1], 0)]
         if stale:
             for nid in stale:
                 del batch["received"][nid]
@@ -781,32 +806,35 @@ class WorkLoop(ControlLoop):
             batch["received"] = {n: row for (_, n), row in batch["received"].items()}
             self._finish_readout(now)
 
+    def _apply_refresh(self, sid, target, rows, links, demands, now):
+        ttl = self.config["observation_ttl_ns"]
+        demand = demands["services"].get(sid)
+        for node, row in rows.items():
+            row["matched"] = (now - row["observed_at_ns"] <= ttl
+                              and row["version"] >= self.versions.get(node, 0)
+                              and refresh_matches(target["decision"], target["epoch"], node, row["result"], demand))
+        record = self.confirmed[sid]
+        record["readback_nodes"] = deepcopy(rows)
+        record["query_ids"] = {node: row["query_id"] for node, row in rows.items()}
+        ok = len(rows) == len(target["decision"]["node_path"]) and all(r["matched"] for r in rows.values())
+        record["configuration_checked_at_ns"] = now
+        record["configuration_observed"] = ok
+        if ok:
+            self.refresh_blocks.pop(sid, None)
+            self.refresh_completed += 1
+        else:
+            self.refresh_blocks[sid] = self._refresh_key(sid, links, demands)
+            self.refresh_failures += 1
+        return ok
+
     def _finish_configuration_refresh(self, now):
         batch = self.readout
         links, demands = self._snapshots(now)
         good, unknown = [], []
-        ttl = self.config["observation_ttl_ns"]
         for sid, target in batch["targets"].items():
             rows = {n: row for (s, n), row in batch["received"].items() if s == sid}
-            demand = demands["services"].get(sid)
-            for node, row in rows.items():
-                row["matched"] = (now - row["observed_at_ns"] <= ttl
-                                  and row["version"] >= self.versions.get(node, 0)
-                                  and refresh_matches(target["decision"], target["epoch"], node, row["result"], demand))
-            record = self.confirmed[sid]
-            record["readback_nodes"] = deepcopy(rows)
-            record["query_ids"] = {node: row["query_id"] for node, row in rows.items()}
-            ok = len(rows) == len(target["decision"]["node_path"]) and all(r["matched"] for r in rows.values())
-            record["configuration_checked_at_ns"] = now
-            record["configuration_observed"] = ok
-            if ok:
-                good.append(sid)
-                self.refresh_blocks.pop(sid, None)
-            else:
-                unknown.append(sid)
-                self.refresh_blocks[sid] = self._refresh_key(sid, links, demands)
-        self.refresh_completed += len(good)
-        self.refresh_failures += len(unknown)
+            matched = self._apply_refresh(sid, target, rows, links, demands, now)
+            (good if matched else unknown).append(sid)
         inside = batch.get("inside_order", False)
         self._event("config_refresh_result", now, matched=good, unconfirmed=unknown,
                     retained_wire_bps=self.budgets(), replan_before_write=not inside,
@@ -902,6 +930,8 @@ class WorkLoop(ControlLoop):
 
     def receive_ack(self, ack, now, source_node):
         self.now_ns = now
+        if self.independent_refresh.jobs and self.independent_refresh.receive(ack, now, source_node):
+            return
         if self.readout is not None:
             self._readout_ack(ack, now, source_node)
             return
