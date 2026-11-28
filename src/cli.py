@@ -97,6 +97,8 @@ def main(argv=None, *, on_policy_ready=None):
     run.add_argument("--tokenizer",type=Path,default=os.environ.get("B03_TOKENIZER"))
     run.add_argument("--device",choices=["cpu","cuda"],default="cuda")
     run.add_argument("--services", help="Comma-separated active workload, or all; defaults to the selected scenario")
+    run.add_argument("--include-arrivals", action="store_true",
+                     help="Keep the selected startup workload and include all later registrations on delivery")
     run.add_argument("--writable-services", help="Subset that can receive writes")
     run.add_argument("--protected-services", default="")
     run.add_argument("--service-end", action="append", default=[], metavar="ID=SECONDS",
@@ -255,6 +257,16 @@ def main(argv=None, *, on_policy_ready=None):
             on_policy_ready(chooser)
     specs = {x.service_id: x for x in scenario.services + scenario.added_services}
     ids = sorted(specs) if selection == "all" else sorted(set(selection))
+    if args.include_arrivals:
+        if args.mode != "workorder" or args.writable_services is not None or selection == "all":
+            run.error("--include-arrivals requires a startup workload in workorder mode with discovered writes")
+        startup_ids = {sid for sid, spec in specs.items() if spec.registered_at_us == 0}
+        protected_ids = set(filter(None, args.protected_services.split(",")))
+        if not set(ids) <= startup_ids or not protected_ids <= set(ids):
+            run.error("The selected and protected sets must contain only the named startup services")
+        source_info["workloadSelection"] = {"schema": "b03.startup-plus-arrivals.v1", "startup": ids}
+        # Only the simulator receives the expanded traffic filter. Roles discover every ID from delivered reports.
+        ids = sorted(set(ids) | (specs.keys() - startup_ids))
     if not ids or not set(ids) <= specs.keys():
         run.error("Unknown or empty original service selection")
     activity = {}
@@ -265,7 +277,7 @@ def main(argv=None, *, on_policy_ready=None):
         activity = {"schema": "b03.demand-ends.v1", "origin": "experiment", "endSeconds": cutoffs}
         json_file(out / "input/b03-demand-ends.json", activity)
     writable = set(ids) if args.writable_services is None else set(filter(None, args.writable_services.split(",")))
-    discover_writes = selection == "all" and args.writable_services is None
+    discover_writes = (selection == "all" or args.include_arrivals) and args.writable_services is None
     protected = set(filter(None, args.protected_services.split(",")))
     if not writable <= set(ids) or not protected <= set(ids):
         run.error("Write scope and protected IDs must be part of the original selected workload")

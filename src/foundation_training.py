@@ -25,7 +25,11 @@ def load_rollout(path, parameters):
     if (policy.get("adapterId") != "b03.foundation-selector" or policy.get("mode") != "online-ppo"
             or policy.get("parameterSha256") != evidence_digest(parameters)):
         raise ValueError("Training observations must come from the selected on-policy checkpoint")
-    facts = FoundationFeatures(json.loads((run / "network-foundation.json").read_bytes()))
+    catalog = json.loads((run / "network-foundation.json").read_bytes())
+    if (cond["authority"]["discovery"] != "all_delivered_registered"
+            and set(cond["authority"]["allowedServiceIds"]) - catalog["initialServices"].keys()):
+        raise ValueError("Future registrations must enter training work orders through delivered reports")
+    facts = FoundationFeatures(catalog)
     def read_lines(name):
         with (run/name).open(encoding="utf-8") as rows:
             yield from (json.loads(line) for line in rows)

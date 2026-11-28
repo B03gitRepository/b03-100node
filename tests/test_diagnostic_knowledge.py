@@ -70,6 +70,16 @@ class DiagnosticKnowledge(unittest.TestCase):
             verify_agent_facts(None, events, *args)
         with self.assertRaises(ValueError):
             verify_agent_facts(catalog, events, args[0], dict(args[1], options={}))
+        forged = deepcopy(events)
+        forged[1]["services"].clear()
+        forged[2]["tool_choice"]["observation"]["networkReference"]["serviceIds"] = []
+        with self.assertRaisesRegex(ValueError, "omits a service"):
+            verify_agent_facts(catalog, forged, *args)
+        forged = deepcopy(events)
+        forged[1]["services"]["unreported"] = {}
+        forged[2]["tool_choice"]["observation"]["networkReference"]["serviceIds"].append(None)
+        with self.assertRaisesRegex(ValueError, "roster"):
+            verify_agent_facts(catalog, forged, *args, cond["authority"])
         reference["serviceIds"] = []
         with self.assertRaisesRegex(ValueError, "Model network reference"):
             verify_agent_facts(catalog, events, *args)

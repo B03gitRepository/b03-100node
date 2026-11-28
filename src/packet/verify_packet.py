@@ -76,6 +76,15 @@ def verify_service_definitions(conditions, summary, initial, events):
     custom = conditions.get("sceneOrigin") == "custom"
     key = "serviceDefinitions" if custom else "officialDefinitions"
     definitions = conditions[key]
+    workload = conditions.get("workloadSelection")
+    if workload is not None:
+        startup_ids = {row["serviceId"] for row in initial if row.get("startAtSec") == 0}
+        selected = workload.get("startup", [])
+        if (workload.get("schema") != "b03.startup-plus-arrivals.v1" or not selected
+                or selected != sorted(set(selected)) or not set(selected) <= startup_ids
+                or set(conditions["services"]) != set(selected) | (raw.keys() - startup_ids)
+                or conditions["authority"]["discovery"] != "all_delivered_registered"):
+            raise ValueError("Workload filter or delivered registration authority differs from its source")
     if custom and (set(definitions) != set(conditions["services"]) or summary["sourceDefinitions"] != definitions
                    or len(initial) != conditions["initialServiceCount"] or len(events) != conditions["eventCount"]):
         raise ValueError("Custom workload differs from its recorded inventory")
@@ -347,7 +356,7 @@ def verify(run, *, strict_source=False, components=None, checkpoint=None, tokeni
     if mode == "workorder":
         from knowledge.agent_facts import verify_agent_facts
         catalog = load(run / "network-foundation.json") if "networkFoundation" in cond else None
-        checked = verify_agent_facts(catalog, acts, cond["rcPolicy"], (cond.get("components") or {}).get("model"))
+        checked = verify_agent_facts(catalog, acts, cond["rcPolicy"], (cond.get("components") or {}).get("model"), cond.get("authority"))
         if catalog is not None:
             verification["agentNetworkFoundation"] = checked
     return {"verification":verification,"lifecycle":lifecycle, **({"knowledgeQueries": knowledge_queries, "competitionMetrics": summary["competitionMetrics"]} if "competitionMetrics" in summary else {}),"scene":cond["scene"],"nodes":len(topo["nodes"]),"links":len(topo["links"]),"run":run.name,"mode":mode,"summarySha256":sha(run/"SUMMARY.json"),"business":summary["business"],

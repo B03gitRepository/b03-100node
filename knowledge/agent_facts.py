@@ -75,7 +75,7 @@ def order_records(events, event, purpose=None):
     return rows
 
 
-def verify_agent_facts(catalog, events, policy, model=None):
+def verify_agent_facts(catalog, events, policy, model=None, authority=None):
     """Recompute both role inputs from the sealed catalogue and the matching observation."""
     hook = policy.get("networkFoundationHook") is True
     if model is not None:
@@ -101,6 +101,14 @@ def verify_agent_facts(catalog, events, policy, model=None):
         if any(row.get("snapshot_id") != snap or row.get("time_ns") != state["now_ns"]
                for row in (diag, evidence, plan)):
             raise ValueError("Network foundation handoff differs from its sealed planning snapshot")
+        visible = state["services"].keys() | state["confirmed"].keys()
+        roster = set(diag["services"])
+        if not visible.issubset(roster):
+            raise ValueError("Network reference omits a service present in the delivered snapshot")
+        if authority is not None:
+            permitted = () if authority["discovery"] == "all_delivered_registered" else authority["allowedServiceIds"]
+            if roster != visible.union(permitted):
+                raise ValueError("Network reference service roster differs from the snapshot and grant")
         expected = facts.compare_reports(state)
         if diag.get("networkBaseline") != expected or plan.get("rc_network_baseline_digest") != evidence_digest(expected):
             raise ValueError("Agent network baseline differs from its catalogue or the delivered reports")
