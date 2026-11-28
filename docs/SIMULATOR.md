@@ -75,13 +75,23 @@ hashlib.sha256(json.dumps(files, sort_keys=True, separators=(",", ":")).encode("
 
 ## 暂缓清理不可达设备
 
-默认设备环等待未完成的清理。长时间故障时，可在启动工单时启用以下选项，让无资源冲突的其他工单继续。
+正式工单默认使用 v2 挂起失联清理。以下命令显式选择历史 v1 等待行为，原归档沿用其记录的恢复版本。
 
 ```sh
-python run.py run --mode workorder --defer-unreachable-cleanup --output runs/deferred-cleanup
-python run.py verify runs/deferred-cleanup
+python run.py run --mode workorder --no-defer-unreachable-cleanup --output runs/legacy-cleanup
+python run.py verify runs/legacy-cleanup
 ```
 
 当停源或清理命令超时且读回仍不可达，v2 记录指令、目标设备、旧配置代次和已保留的线速。被挂起的业务保持占用，尚未开始的同单业务退回下一轮重算。健康业务仍可依照剩余容量使用共享链路。来自本节点或邻居的新鲜可达证据可唤醒补查，确认释放后才归还容量。终态记录在 `b03LoopStatus.deferred_cleanups`。
 
 引擎探针同时记录本端及对端状态。同一端口连续两份新鲜报告达到队列包数上限的 75% 时进入拥堵状态，降至 50% 后退出。对于已有配置的业务，OM/RC 可以根据可核验的新鲜相邻节点报告对离线目的端执行停源。多项同时符合时优先处理占用线速最大的业务。[底图与信道运行方式](FOUNDATION.md)
+
+## 正式排空验收
+
+100 节点 01 工况各策略使用相同窗口参数 `--start 170 --end 219 --drain 60`。219 秒停止计分，设备控制最多继续至 279 秒。实测求解时间仍在下发前进入仿真时钟。释放沿用停源、保留期、逐跳清理与读回。离线或失联可能在期限内无法确认。
+
+`SUMMARY.json` 的 `drainStatus` 登记已读回释放数、待释放业务、挂起与未完成工单，以及仍有新鲜在服需求的配置。`unresolvedDemandIds` 表示欠缺可判定的需求证据。正式验收使用以下命令，排空未完成或历史档案缺少该项证据时返回非零状态。
+
+```sh
+python run.py verify runs/official --require-complete-drain --report runs/official-verified.json
+```

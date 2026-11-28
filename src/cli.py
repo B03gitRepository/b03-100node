@@ -106,12 +106,14 @@ def main(argv=None, *, on_policy_ready=None):
     run.add_argument("--start", type=int)
     run.add_argument("--end", type=int)
     run.add_argument("--drain", type=int)
-    run.add_argument("--defer-unreachable-cleanup", action="store_true",
-                     help="Park unresolved device work under the v2 recovery contract in workorder mode")
+    run.add_argument("--defer-unreachable-cleanup", action=argparse.BooleanOptionalAction, default=None,
+                     help="Park unreachable work in workorder mode (default). Use --no-defer-unreachable-cleanup for v1.")
     run.add_argument("--drop-install-ack", action="store_true", help="Test one lost native install receipt")
     run.add_argument("--output", type=Path, required=True)
     check = actions.add_parser("verify", help="Validate causal evidence, native device writes, QoS, and packet accounts")
     check.add_argument("directory", type=Path)
+    check.add_argument("--require-complete-drain", action="store_true",
+                       help="Fail acceptance when work-order drain closure is incomplete or unrecorded")
     check.add_argument("--report", type=Path, help="New file for complete per-service verification results")
     run.add_argument("--components", type=Path, help="Component manifest (default: config/components.json)")
     run.add_argument("--record-component-io", action="store_true", help="Save exact solver input and output for local reproduction")
@@ -152,6 +154,8 @@ def main(argv=None, *, on_policy_ready=None):
         if args.report:
             json_file(args.report, result)
         print(json.dumps({k: result[k] for k in ("scene", "nodes", "links", "mode", "acceptedPathChecks", "verifiedDeviceQueryCount", "actualModelCalls", "toolChoices", "business", "packets", "verification")}, ensure_ascii=False))
+        if args.require_complete_drain and result["verification"].get("drainStatus", {}).get("status") != "complete":
+            check.exit(1, "Work-order drain closure is incomplete or unrecorded. See the verification report.\n")
         return
     if args.command == "knowledge":
         if args.channel_profile is not None:
@@ -185,8 +189,10 @@ def main(argv=None, *, on_policy_ready=None):
         else:
             print(json.dumps(result, ensure_ascii=False, indent=2))
         return
-    if args.defer_unreachable_cleanup and args.mode != "workorder":
-        run.error("--defer-unreachable-cleanup is a work-order device recovery option")
+    if args.defer_unreachable_cleanup is None:
+        args.defer_unreachable_cleanup = args.mode == "workorder"
+    elif args.mode != "workorder":
+        run.error("Unreachable cleanup recovery options require --mode workorder")
     network = _network_source(args, run)
     args.channel_selection = None
     if args.no_channel or args.channel_profile is not None:
@@ -296,6 +302,8 @@ def main(argv=None, *, on_policy_ready=None):
                               "rateScale": config["rate_scale"], "scope": "B03 work orders; package/single use native stock review authority"},
                 "coldStart": args.start != 0, "match": "same input bytes, reporting, start/end/drain, clocks, eligible IDs, full demand, physical queues and seed"}
     if args.mode == "workorder":
+        from drain_evidence import CONTRACT as drain_contract
+        identity["drainContract"] = drain_contract
         identity["knowledgeBindingContract"] = BINDING_CONTRACT
         identity["deviceRecovery"] = {"contractVersion": ("b03.deferred-cleanup.v2" if args.defer_unreachable_cleanup
                                                           else "b03.deferred-cleanup.v1"),
@@ -390,6 +398,12 @@ def main(argv=None, *, on_policy_ready=None):
         summary["simulatorPorts"] = sim.ports.receipt()
     if args.mode == "workorder":
         from competition_metrics import competition_metrics
+        from drain_evidence import drain_receipt, file_rows
+        summary["drainStatus"] = drain_receipt(identity, summary["clock"], file_rows(out / "controller.jsonl"),
+                                              file_rows(out / "b03.jsonl"))
+        if summary["drainStatus"]["status"] == "incomplete":
+            print("WARNING: work-order drain incomplete at configured deadline",
+                  json.dumps(summary["drainStatus"], ensure_ascii=False), file=sys.stderr)
         summary["competitionMetrics"] = competition_metrics(out, summary)
     json_file(out / "SUMMARY.json", summary)
     from integrity import seal

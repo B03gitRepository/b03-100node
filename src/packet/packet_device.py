@@ -22,7 +22,7 @@ from packet_device_readback import (
 class WorkLoop(ControlLoop):
     decision_compute_mode = "measured_rc_selection_and_solver_before_dispatch"
 
-    def __init__(self, control, roles, emit, *, defer_unreachable_cleanup=False):
+    def __init__(self, control, roles, emit, *, defer_unreachable_cleanup=True):
         super().__init__(control.link_reports, control.service_reports, self._send, self._log, control.options)
         self.roles, self.emit = roles, emit
         self.transport, self.native_log = control.send_command, control.log_control
@@ -978,7 +978,7 @@ class WorkLoop(ControlLoop):
         self._issue(now, node, deepcopy(action))
 
 
-def install(sim, roles, emit, *, defer_unreachable_cleanup=False):
+def install(sim, roles, emit, *, defer_unreachable_cleanup=True):
     """Bind the work order through delivered caches and the single packet command channel."""
     if hasattr(sim, "connect_work_order"):
         return sim.connect_work_order(roles, emit, defer_unreachable_cleanup=defer_unreachable_cleanup)

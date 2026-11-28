@@ -115,7 +115,7 @@ def attach_device_readers(sim):
         sim.control.node_executors[node] = ReportingExecutor(executor, port(node, executor))
 
 
-def bind_work_loop(sim, roles, emit, *, defer_unreachable_cleanup=False):
+def bind_work_loop(sim, roles, emit, *, defer_unreachable_cleanup=True):
     """Attach the adapter immediately after Simulation construction, before the first advance."""
     from packet_device import WorkLoop
     control = sim.control
@@ -140,7 +140,7 @@ class MeasurementMixin:
         self.dropped_ack = None
         super().__init__(*args, **kwargs)
 
-    def connect_work_order(self, roles, emit, *, defer_unreachable_cleanup=False):
+    def connect_work_order(self, roles, emit, *, defer_unreachable_cleanup=True):
         return bind_work_loop(self, roles, emit, defer_unreachable_cleanup=defer_unreachable_cleanup)
 
     def meter_snapshot(self):

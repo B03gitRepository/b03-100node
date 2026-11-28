@@ -120,7 +120,8 @@ class DestinationStopTests(unittest.TestCase):
                       "provenance": {"schema": "b03.provenance.v2"}}
         try:
             with PacketRoles(ids, actions.append, chooser=chooser) as roles:
-                loop = install(sim, roles, actions.append, defer_unreachable_cleanup=True)
+                loop = install(sim, roles, actions.append)
+                self.assertTrue(loop.defer_unreachable_cleanup)
                 sim.advance(7_000_000_000)
                 before = {sid: val["epoch"] for sid, val in loop.confirmed.items()}
                 budgets = loop.budgets()

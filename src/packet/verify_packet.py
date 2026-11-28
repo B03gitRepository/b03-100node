@@ -348,6 +348,10 @@ def verify(run, *, strict_source=False, components=None, checkpoint=None, tokeni
             latency[kind].append(pk["time_ns"]-pk["created_at_ns"])
     from lifecycle_evidence import check_lifecycle
     lifecycle = check_lifecycle(plans, acts, demand_index, cond, probe_index)
+    from drain_evidence import verify_drain
+    drain = verify_drain(cond, summary, ct, acts, lines(run / "packets-control.jsonl"))
+    if drain is not None:
+        verification["drainStatus"] = drain
     if any(plan.get("source_stop") for plan in plans):
         from destination_guard import verify_source_stops
         verification["verifiedSourceStopOrders"] = verify_source_stops(plans, acts, probe_index, demand_index, cond)
