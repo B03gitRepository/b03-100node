@@ -37,3 +37,19 @@ scenario-config.json
 *.tar
 *.tgz
 *.gguf
+
+# Shared four-node synthetic example. Keep all other scenario folders and inputs private.
+!/knowledge/scenarios/
+/knowledge/scenarios/*
+!/knowledge/scenarios/field-survey/
+/knowledge/scenarios/field-survey/*
+!/knowledge/scenarios/field-survey/scripts/
+/knowledge/scenarios/field-survey/scripts/*
+!/knowledge/scenarios/field-survey/manifest.json
+!/knowledge/scenarios/field-survey/manifest-plain.json
+!/knowledge/scenarios/field-survey/network.json
+!/knowledge/scenarios/field-survey/net-topo.json
+!/knowledge/scenarios/field-survey/bg-service.json
+!/knowledge/scenarios/field-survey/traffic.json
+!/knowledge/scenarios/field-survey/scenario-config.json
+!/knowledge/scenarios/field-survey/scripts/script-survey.json

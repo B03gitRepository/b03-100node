@@ -120,8 +120,8 @@ def check_lifecycle(plans, acts, demand_index, conditions, probe_index=None):
     writable = set(permissions["allowedServiceIds"]) - set(permissions.get("protectedServiceIds", ()))
     ttl = conditions["simulation"]["control"]["observation_ttl_ns"]
     from packet_cleanup_evidence import cleanup_budgets
-    recovered = cleanup_budgets(acts, grouped, conditions, probe_index or {})
-    interleaved = any(e["event"] == "cleanup_deferred" for e in acts)
+    recovered = cleanup_budgets(acts, grouped, conditions, probe_index or {}, demand_index)
+    interleaved = any(e["event"] in {"cleanup_deferred", "release_parked"} for e in acts)
     by_next_plan = {}
     unsigned_followups = 0
     if interleaved:
@@ -220,7 +220,8 @@ def check_lifecycle(plans, acts, demand_index, conditions, probe_index=None):
                      and Counter(started[0]["budgets_before"]) == held, wid, "device plan or initial reservation differs")
         for event in events["service_released"]:
             _require(event["service_id"] in due, wid, "unplanned retirement")
-            _check_retired(plan, state, event, events, reads, held, recovered.get(wid))
+            balance = recovered.get((wid, event["service_id"]), recovered.get(wid))
+            _check_retired(plan, state, event, events, reads, held, balance)
         ends = events["work_verified"] + events["work_incomplete"]
         _require(len(ends) <= 1, wid, "duplicate work completion")
         matched = sorted(ends[0]["om"]["matched"]) if ends else []

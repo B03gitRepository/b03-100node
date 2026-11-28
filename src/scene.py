@@ -1,4 +1,4 @@
-"""Read the supplied packet engine and build a run-local view of official B03 inputs."""
+"""Prepare official or versioned custom inputs for the same pinned packet engine."""
 from __future__ import annotations
 
 import hashlib
@@ -10,9 +10,13 @@ import sys
 import tarfile
 from pathlib import Path, PurePosixPath
 
+from scenario_manifest import archive_input, native_source_files, parse_json_bytes, read_custom_manifest, resolve_manifest_reference, selected_channel
+
 ROOT = Path(__file__).resolve().parent.parent
 PROFILE = json.loads((ROOT / "config/profile.json").read_bytes())
 DEPENDENCY = json.loads((ROOT / "config/simulator.lock.json").read_bytes())
+# The first bundled release predated portable engine package metadata.
+PREVIOUS_ENGINE_SHA256 = "910891e496a8c16e6b9ba134abab1e0cbd6b7dd95c31fbb5da7d3ad190b27e30"
 
 
 def sha256(path):
@@ -36,6 +40,28 @@ def write_json(path, data):
     with path.open("x", encoding="utf-8") as stream:
         json.dump(data, stream, ensure_ascii=False, indent=2, allow_nan=False)
         stream.write("\n")
+
+
+def archive_network_foundation(output, network, config, source_info, *, manifest=None):
+    """Give the agents the same initial inventory and effective limits used to construct the engine."""
+    from knowledge.network import build_foundation
+    resources = {"queue_packets": config["queue_packets"], "queue_bytes": config["queue_bytes"],
+                 "control_headroom_fraction": config["control"]["control_headroom_fraction"]}
+    profile = {"resources": resources, "nodeCapabilities": network["nodeCapabilities"]}
+    topology = parse_json_bytes(archive_input(output, "topology", source_info).read_bytes())
+    initial = parse_json_bytes(archive_input(output, "initial_services", source_info).read_bytes())
+    channel = parse_json_bytes((output / "channel-model.json").read_bytes()) if "channelModel" in source_info else None
+    foundation = build_foundation(topology, initial, channel, resources, profile["nodeCapabilities"])
+    profile_path, foundation_path = output / "network-profile.json", output / "network-foundation.json"
+    write_json(profile_path, profile)
+    write_json(foundation_path, foundation)
+    network_id = network.get("id")
+    identity = {"file": foundation_path.name, "sha256": sha256(foundation_path),
+                "networkId": network_id, "origin": "catalog" if network_id is not None else "external",
+                "profileSha256": sha256(profile_path)}
+    if network_id is not None and manifest is not None:
+        identity["manifest"] = manifest.name
+    return foundation, identity
 
 
 def simulator_root(value=None):
@@ -64,8 +90,9 @@ def validate_engine_lock(lock):
     canonical = json.dumps(files, sort_keys=True, separators=(",", ":")).encode("utf-8")
     if lock.get("runtimeSha256") != hashlib.sha256(canonical).hexdigest():
         raise ValueError("Packet simulator fingerprint does not match its file table")
-    if (lock["runtimeSha256"], lock["distribution"], lock["version"]) != (
-            DEPENDENCY["runtimeSha256"], DEPENDENCY["distribution"], DEPENDENCY["version"]):
+    identity = (lock["runtimeSha256"], lock["distribution"], lock["version"])
+    if identity not in {(DEPENDENCY["runtimeSha256"], DEPENDENCY["distribution"], DEPENDENCY["version"]),
+                        (PREVIOUS_ENGINE_SHA256, "resnet-simulation", "1.1.0")}:
         if "pyproject.toml" not in files:
             raise ValueError("A separately versioned engine must pin its pyproject.toml metadata")
     return lock
@@ -134,10 +161,98 @@ def has_bundled_data(engine, script):
             and all((engine / name).is_file() for name in assets))
 
 
-def prepare(engine, data, script, output):
-    """Keep the official files byte-identical. Add only native scenario and traffic metadata."""
+def _load_local(engine, output, control, *, input_folder="input", resources=None):
+    """Use the pinned engine's config merge, native schema validation and ScenarioSpec builder."""
     from resnet.application.config import load_config
+    shutil.copyfile(engine / "configs/common.json", output / "native-common.json")
+    # Install the selected resource limits before the native engine validates its configuration.
+    options = {"control": dict(control)}
+    if resources:
+        options.update(queue_packets=resources["queue_packets"], queue_bytes=resources["queue_bytes"])
+        options["control"]["control_headroom_fraction"] = resources["control_headroom_fraction"]
+    selection = {"schema": "resnet-experiment-v1", "extends": "native-common.json", "scenario_dir": input_folder,
+                 "simulation": options, "cases": [{"case_id": "packet_control", "mode":"control","start_s":0,"end_s":None}]}
+    write_json(output / "native-experiment.json", selection)
+    return load_config(output / "native-experiment.json", "packet_control")
+
+
+def _prepare_channel(output, profile_id):
+    """Validate the original native scene, then build the input the packet engine will run."""
+    from knowledge.channels.model import project_channel_inputs, read_edition
+    from resnet.io import load_scenario
+
+    original = output / "input"
+    raw = load_scenario(original)
+    edition, profile, _ = read_edition(ROOT / "knowledge/channels", profile_id)
+    (output / "channel-model.json").write_bytes(edition)
+    roles = raw.raw_documents["scenario-config.json"]["files"]
+    projected = project_channel_inputs(profile, roles, raw.raw_documents.__getitem__)
+    effective = output / "effective-input"
+    for name in raw.source_hashes:
+        target = effective / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if name in projected:
+            write_json(target, projected[name])
+        else:
+            shutil.copyfile(original / name, target)
+    return effective.name
+
+
+def _prepare_custom(engine, manifest_path, output, resources=None, channel_selection=None):
+    root = Path(manifest_path).resolve(strict=True).parent
+    archived = output / "scenario-manifest.json"
+    shutil.copyfile(manifest_path, archived)
+    manifest = read_custom_manifest(archived)
+    native = root / "scenario-config.json"
+    if not native.resolve(strict=True).is_relative_to(root):
+        raise ValueError("Native scenario config is outside the manifest directory")
+    raw = native.read_bytes()
+    members = native_source_files(parse_json_bytes(raw))
+    local = output / "input"
+    local.mkdir()
+    (local / "scenario-config.json").write_bytes(raw)
+    for name in members[1:]:
+        source = (root / name).resolve(strict=True)
+        if not source.is_file() or not source.is_relative_to(root):
+            raise ValueError("Custom input is outside the manifest directory: " + name)
+        target = local / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+    # Explicit nulls disable the official topology's parallel-link defaults.
+    control = {"control_primary_link": None, "control_backup_link": None, **manifest["control"]}
+    profile = selected_channel(manifest, channel_selection)
+    folder = _prepare_channel(output, profile) if profile is not None else "input"
+    scenario, config, _, identity = _load_local(engine, output, control, input_folder=folder, resources=resources)
+    if manifest["window"]["end"] > scenario.duration_s:
+        raise ValueError("Custom window ends after the scenario horizon")
+    ids = {s.service_id for s in (*scenario.services, *scenario.added_services)}
+    if manifest["services"] != "all" and set(manifest["services"]) - ids:
+        raise ValueError("Custom manifest selects an unknown service")
+    if control["control_primary_link"] is not None:
+        endpoints = {l.link_id: {l.src_node_id, l.dst_node_id} for l in scenario.links}
+        primary, backup = control["control_primary_link"], control["control_backup_link"]
+        if primary not in endpoints or endpoints[primary] != endpoints.get(backup):
+            raise ValueError("Custom control links must exist and join the same two nodes")
+    return scenario, config, identity, local
+
+
+def prepare(engine, data, script, output, *, manifest_path=None, resources=None, channel_selection=None,
+            archive_bundled_config=False):
+    """Bind archived bytes to the selected input contract before running any packet events."""
+    from resnet.application.config import load_config
+    if manifest_path is not None:
+        if data is not None or script is not None:
+            raise ValueError("Select a custom manifest or an official script")
+        manifest_path = resolve_manifest_reference(ROOT, manifest_path)
+        if resources is None:
+            from knowledge.network import resolve_external
+            resources = resolve_external(ROOT, manifest_path)["resources"]
+        return _prepare_custom(engine, manifest_path, output, resources, channel_selection)
+    if channel_selection is not None:
+        raise ValueError("Channel overrides require a custom scene")
     if data is None:
+        if resources:
+            raise ValueError("An explicit network resource profile requires a selected scenario directory")
         if not has_bundled_data(engine, script):
             raise ValueError("Supply --data PATH or set B03_DATA to the official scenario folder or dataset archive.")
         scenario_dir = engine / "data/OFFICIAL20-script09"
@@ -145,6 +260,9 @@ def prepare(engine, data, script, output):
             if sha256(engine / name) != expected:
                 raise ValueError(f"Unexpected bundled official input: {name}")
         scenario, config, _, identity = load_config(engine / "configs/official20.json", "official_control")
+        if archive_bundled_config:
+            shutil.copyfile(engine / "configs/common.json", output / "native-common.json")
+            shutil.copyfile(engine / "configs/official20.json", output / "native-experiment.json")
         # The auditor always uses the original three files that actually supplied this run.
         raw = official_bytes(scenario_dir, script)
         signed_inputs(raw, script)
@@ -185,13 +303,7 @@ def prepare(engine, data, script, output):
                    "input_mode": "official_script", "movement_semantics": "endpoint_at_event",
                    "files": {"topology": "net-topo.json", "initial_services": "bg-service.json",
                              "events": f"scripts/script-{script}.json", "traffic": "runtime-traffic.json"}})
-        # Anchor common settings inside the run directory so the replay manifest is portable.
-        shutil.copyfile(engine / "configs/common.json", output / "native-common.json")
-        # The 100-node topology supplies its own pair of parallel incident links.
-        selection = {"schema": "resnet-experiment-v1", "extends": "native-common.json", "scenario_dir": "input",
-                     "simulation": {"control": PROFILE["control"]}, "cases": [{"case_id": "packet_control", "mode":"control","start_s":0,"end_s":None}]}
-        write_json(output / "native-experiment.json", selection)
-        scenario, config, _, identity = load_config(output / "native-experiment.json", "packet_control")
+        scenario, config, _, identity = _load_local(engine, output, PROFILE["control"], resources=resources)
     if len(scenario.nodes) != PROFILE["nodes"] or len(scenario.links) != PROFILE["links"]:
         raise ValueError(f"Wrong physical topology: {len(scenario.nodes)} nodes and {len(scenario.links)} links")
     return scenario, config, identity, local

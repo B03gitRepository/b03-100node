@@ -1,0 +1,98 @@
+{
+  "nodes": [
+    {
+      "nodeId": "FIELD",
+      "nodeType": "sampling_platform",
+      "ip": "192.0.2.1",
+      "mask": "255.255.255.0",
+      "position": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "nodeId": "EAST",
+      "nodeType": "relay",
+      "ip": "192.0.2.2",
+      "mask": "255.255.255.0",
+      "position": {
+        "x": 1,
+        "y": 1
+      }
+    },
+    {
+      "nodeId": "WEST",
+      "nodeType": "relay",
+      "ip": "192.0.2.3",
+      "mask": "255.255.255.0",
+      "position": {
+        "x": 1,
+        "y": -1
+      }
+    },
+    {
+      "nodeId": "HUB",
+      "nodeType": "control_station",
+      "ip": "192.0.2.4",
+      "mask": "255.255.255.0",
+      "position": {
+        "x": 2,
+        "y": 0
+      }
+    }
+  ],
+  "links": [
+    {
+      "linkId": "FIELD-EAST",
+      "srcNodeId": "FIELD",
+      "dstNodeId": "EAST",
+      "linkType": "radio",
+      "params": {
+        "bandwidthBps": 2400000,
+        "delayMs": 2,
+        "jitterMs": 0,
+        "ber": 0,
+        "packetLossRate": 0
+      }
+    },
+    {
+      "linkId": "EAST-HUB",
+      "srcNodeId": "EAST",
+      "dstNodeId": "HUB",
+      "linkType": "radio",
+      "params": {
+        "bandwidthBps": 2400000,
+        "delayMs": 2,
+        "jitterMs": 0,
+        "ber": 0,
+        "packetLossRate": 0
+      }
+    },
+    {
+      "linkId": "FIELD-WEST",
+      "srcNodeId": "FIELD",
+      "dstNodeId": "WEST",
+      "linkType": "microwave",
+      "params": {
+        "bandwidthBps": 2400000,
+        "delayMs": 4,
+        "jitterMs": 0,
+        "ber": 0,
+        "packetLossRate": 0
+      }
+    },
+    {
+      "linkId": "WEST-HUB",
+      "srcNodeId": "WEST",
+      "dstNodeId": "HUB",
+      "linkType": "microwave",
+      "params": {
+        "bandwidthBps": 2400000,
+        "delayMs": 4,
+        "jitterMs": 0,
+        "ber": 0,
+        "packetLossRate": 0
+      }
+    }
+  ]
+}

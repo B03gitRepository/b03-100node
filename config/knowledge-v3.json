@@ -1,0 +1,8 @@
+{
+  "extends": "components.json",
+  "knowledge": {
+    "version": "1.2.0",
+    "source": "../knowledge/technical-v3.json",
+    "contractVersion": "b03.knowledge.lookup.v2"
+  }
+}

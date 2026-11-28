@@ -1,0 +1,33 @@
+{
+  "schema": "b03.network-pack.v1",
+  "id": "field-survey",
+  "origin": "custom",
+  "nodeCapabilities": {
+    "sampling_platform": {
+      "allowedLinkTypes": [
+        "microwave",
+        "radio"
+      ],
+      "maxInterfaces": 2
+    },
+    "relay": {
+      "allowedLinkTypes": [
+        "microwave",
+        "radio"
+      ],
+      "maxInterfaces": 2
+    },
+    "control_station": {
+      "allowedLinkTypes": [
+        "microwave",
+        "radio"
+      ],
+      "maxInterfaces": 2
+    }
+  },
+  "resources": {
+    "queue_packets": 128,
+    "queue_bytes": 131072,
+    "control_headroom_fraction": 0.05
+  }
+}

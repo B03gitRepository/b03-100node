@@ -41,6 +41,10 @@ def archived_engine_lock(run, conditions, files, *, default_lock=None):
                 ("simulation" in conditions or registration.get("entrypoint") != "builtin")):
             raise ValueError("Missing simulator runtime identity")
         original = scene.DEPENDENCY if default_lock is None else default_lock
+        if (conditions["releaseManifestSha256"] == scene.PREVIOUS_ENGINE_SHA256
+                and original["runtimeSha256"] != scene.PREVIOUS_ENGINE_SHA256):
+            original = scene.validate_engine_lock(json.loads(
+                (scene.ROOT / "simulator/locks/resnet-1.1.0.json").read_bytes()))
         if conditions["releaseManifestSha256"] != original["runtimeSha256"]:
             raise ValueError("Unknown historical packet simulator release")
         return original

@@ -1,0 +1,7 @@
+{
+  "extends": "foundation-selector.json",
+  "model": {
+    "mode": "online-ppo",
+    "options": {"drawSeed": 73}
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "scenario_id": "field-survey",
+  "duration_s": 80,
+  "official_dataset": false,
+  "input_mode": "project_activity",
+  "files": {
+    "topology": "net-topo.json",
+    "initial_services": "bg-service.json",
+    "events": "scripts/script-survey.json",
+    "traffic": "traffic.json"
+  }
+}

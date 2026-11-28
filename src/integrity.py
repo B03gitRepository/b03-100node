@@ -9,14 +9,19 @@ from pathlib import Path
 import re
 
 from component_config import digest, work_order_components_digest
-from provenance import SCHEMA, active_kinds, changed, model_assets, revision, verify_provenance
+from provenance import SCHEMA, active_kinds, changed, checkout_python_files, model_assets, revision, verify_provenance
+from scenario_manifest import native_source_files, read_custom_manifest, selected_channel
 from scene import DEPENDENCY, PROFILE, ROOT, sha256, simulator_root, verify_engine, write_json
 
 
 def source_identity():
     """Preserve the full historical checkout inventory for earlier tools and recovery."""
+    # Scenario inputs have per-run evidence. Historical case indexes are for offline review.
+    knowledge = ROOT / "knowledge"
+    shared_json = [p for p in knowledge.rglob("*.json")
+                   if p.relative_to(knowledge).parts[0] not in {"scenarios", "cases"}]
     paths = [ROOT / "run.py", *(ROOT / "config").glob("*.json"),
-             *(ROOT / "knowledge").glob("*.json"), *(ROOT / "src").rglob("*.py")]
+             *shared_json, *checkout_python_files(ROOT)]
     if (ROOT / "episode.py").is_file():
         paths.append(ROOT / "episode.py")
     if (ROOT / "train.py").is_file():
@@ -62,8 +67,13 @@ def check_members(run, conditions):
     if record.get("schema") != receipt_format(conditions):
         raise ValueError("Unknown packet evidence schema")
     files = record["files"]
-    required = {"CONDITIONS.json", "SUMMARY.json", "b03.jsonl", "business-intervals.jsonl",
-                "input/net-topo.json", "input/bg-service.json", f"input/scripts/script-{conditions['script']}.json"}
+    required = {"CONDITIONS.json", "SUMMARY.json", "b03.jsonl", "business-intervals.jsonl"}
+    if conditions.get("sceneOrigin") == "custom":
+        required.update({"scenario-manifest.json", "input/scenario-config.json", "native-experiment.json", "native-common.json"})
+        if "channelModel" in conditions:
+            required.update({"channel-model.json", "batches.jsonl"})
+    else:
+        required.update({"input/net-topo.json", "input/bg-service.json", f"input/scripts/script-{conditions['script']}.json"})
     optional = {"controller.jsonl", "executions.jsonl", "routes.jsonl", "packets-control.jsonl",
                 "input/b03-demand-ends.json"}
     required.update(name for name in optional if (run / name).exists())
@@ -87,18 +97,87 @@ def check_members(run, conditions):
     return files
 
 
+def _reject_channel_artifacts(run, conditions, files):
+    if ("channelModel" in conditions or "channel-model.json" in files or (run / "channel-model.json").exists()
+            or (run / "effective-input").exists() or any(k.startswith("effective-input/") for k in files)):
+        raise ValueError("Channel artifacts require an explicitly selected custom channel profile")
+
+
 def check_official_inputs(run, conditions, files):
+    _reject_channel_artifacts(run, conditions, files)
+    if ("scenario-manifest.json" in files or (run / "scenario-manifest.json").exists()
+            or any(k in conditions for k in ("sceneContract", "manifestVersion", "manifestSha256", "sourceFiles", "serviceDefinitions", "knowledgePreset", "channelSelection"))):
+        raise ValueError("Custom scenario metadata found in an official receipt")
     if (conditions["nodeCount"], conditions["linkCount"]) != (PROFILE["nodes"], PROFILE["links"]):
         raise ValueError("Run belongs to a different network scale")
     script = conditions["script"]
     if conditions["scene"] != PROFILE["officialScenario"] + "/script-" + script:
         raise ValueError("Unknown official scenario for this network scale")
-    from simulator_component import archived_engine_lock
-    archived_engine_lock(run, conditions, files, default_lock=DEPENDENCY)
     for name in ("net-topo.json", "bg-service.json", f"scripts/script-{script}.json"):
         if (name not in PROFILE["pins"] or conditions["sourceHashes"].get(name) != PROFILE["pins"][name]
                 or files["input/" + name]["sha256"] != PROFILE["pins"][name]):
             raise ValueError("Original official input identity mismatch: " + name)
+
+
+def preset_binding(name, components, implementation):
+    from scenario_manifest import preset_member
+    member = preset_member(name)
+    knowledge = components["knowledge"]
+    return {"id": name, "file": member, "sha256": implementation[member],
+            "componentManifestSha256": components["manifestSha256"],
+            "knowledge": {key: knowledge[key] for key in ("id", "version", "sha256")}}
+
+
+def check_custom_inputs(run, conditions, files):
+    manifest = read_custom_manifest(run / "scenario-manifest.json")
+    config = json.loads((run / "input/scenario-config.json").read_bytes())
+    if (conditions.get("sceneContract") != manifest["schema"] or conditions.get("manifestVersion") != manifest["version"]
+            or conditions.get("manifestSha256") != files["scenario-manifest.json"]["sha256"]
+            or conditions["scene"] != "custom:" + config["scenario_id"] or conditions["script"] is not None
+            or "officialDefinitions" in conditions or config.get("official_dataset") is True):
+        raise ValueError("Custom scene identity differs from its archived manifest or native config")
+    if conditions.get("sourceFiles") != config["files"]:
+        raise ValueError("Custom input roles differ from the archived native config")
+    preset = manifest.get("knowledgePreset")
+    if preset or "knowledgePreset" in conditions:
+        if not preset or conditions.get("knowledgePreset") != preset_binding(
+                preset, conditions["components"], conditions["implementationSha256"]):
+            raise ValueError("Knowledge preset differs from the archived scenario or effective components")
+    native_config_hash = digest([files[name]["sha256"] for name in ("native-experiment.json", "native-common.json")])
+    if native_config_hash != conditions["originalConfigSha256"]:
+        raise ValueError("Custom native experiment or common settings differ from their recorded identity")
+    pins = conditions["sourceHashes"]
+    if set(pins) != set(native_source_files(config)):
+        raise ValueError("Custom scene source inventory differs from its native config")
+    for name, pin in pins.items():
+        if files.get("input/" + name, {}).get("sha256") != pin:
+            raise ValueError("Original custom input identity mismatch: " + name)
+    control = conditions["simulation"]["control"]
+    for key in ("controller_id", "control_primary_link", "control_backup_link"):
+        if control.get(key) != manifest["control"].get(key):
+            raise ValueError("Archived controller setting differs from custom manifest: " + key)
+    selected = selected_channel(manifest, conditions.get("channelSelection"))
+    expected_dir = "effective-input" if selected is not None else "input"
+    experiment = json.loads((run / "native-experiment.json").read_bytes())
+    if experiment.get("scenario_dir") != expected_dir:
+        raise ValueError("Native experiment refers to the wrong channel input directory")
+    if selected is None:
+        _reject_channel_artifacts(run, conditions, files)
+    else:
+        from knowledge.channels.replay import check_channel_derivation
+        check_channel_derivation(run, conditions, files, selected)
+
+
+def check_inputs(run, conditions, files):
+    origin = conditions.get("sceneOrigin", "official")
+    if origin == "custom":
+        check_custom_inputs(run, conditions, files)
+    elif origin == "official":
+        check_official_inputs(run, conditions, files)
+    else:
+        raise ValueError("Unknown archived scene origin")
+    from simulator_component import archived_engine_lock
+    archived_engine_lock(run, conditions, files, default_lock=DEPENDENCY)
     overlay = conditions.get("activityOverlay")
     member = "input/b03-demand-ends.json"
     if member in files or overlay is not None:
@@ -216,16 +295,44 @@ def check_archive(run, conditions, *, strict_source=False, components=None, chec
         from b03_formulas import MEMBER, verify_binding
         verify_binding(conditions["formulaBinding"], (run / MEMBER).read_bytes(),
                        conditions["simulation"], conditions["implementationSha256"])
-    check_official_inputs(run, conditions, files)
+    check_inputs(run, conditions, files)
+    from knowledge.network_replay import check_startup_facts
+    check_startup_facts(run, conditions, files, installed_root=ROOT if strict_source else None)
+    if "channelModel" in conditions:
+        from knowledge.channels.replay import check_channel_batches
+        check_channel_batches(run, conditions)
     check_recorded(conditions)
     proof = conditions.get("provenance")
     simulator_check = "release-lock-only"
     if strict_source:
+        if "knowledgePreset" in conditions:
+            from component_config import load_components
+            from scenario_manifest import resolve_preset
+            binding = conditions["knowledgePreset"]
+            path = resolve_preset(ROOT, binding["id"])
+            if sha256(path) != binding["sha256"]:
+                raise ValueError("Installed knowledge preset differs from the archived version")
+            selected = load_components(path).activate(conditions["provenance"]["policy"])
+            if selected.identity["manifestSha256"] != binding["componentManifestSha256"]:
+                raise ValueError("Effective components from the installed knowledge preset differ from this run")
+            if components is None:
+                components = selected
+            elif components.activate(conditions["provenance"]["policy"]).identity["manifestSha256"] != binding["componentManifestSha256"]:
+                raise ValueError("--components differs from the scenario knowledgePreset")
+        if "channelModel" in conditions:
+            from knowledge.channels.model import read_edition
+            model = conditions["channelModel"]
+            edition, _, _ = read_edition(ROOT / "knowledge/channels", model["id"])
+            if hashlib.sha256(edition).hexdigest() != model["profileSha256"]:
+                raise ValueError("Installed channel profile differs from the archived edition")
         engine = simulator or os.environ.get("B03_SIMULATOR")
         if engine or conditions.get("simulatorRuntime"):
             from simulator_component import archived_engine_lock
             lock = archived_engine_lock(run, conditions, files, default_lock=DEPENDENCY)
-            actual = verify_engine(simulator_root(engine), lock) if conditions.get("simulatorRuntime") else verify_engine(simulator_root(engine))
+            if conditions.get("simulatorRuntime") or lock is not DEPENDENCY:
+                actual = verify_engine(simulator_root(engine), lock)
+            else:
+                actual = verify_engine(simulator_root(engine))
             if actual != conditions["releaseManifestSha256"]:
                 raise ValueError("Installed packet engine differs from the archived release")
             simulator_check = "installed-files"

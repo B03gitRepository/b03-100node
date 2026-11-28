@@ -188,7 +188,8 @@ def verify_ports(run, conditions, summary, controller, executions, intervals):
         raise ValueError("Unresolved scheduled local probe")
     events = {}
     if wanted:
-        topology = json.loads((run / "input/net-topo.json").read_bytes())
+        from scenario_manifest import archive_input
+        topology = json.loads(archive_input(run, "topology", conditions).read_bytes())
         endpoints = {link["linkId"]: (link["srcNodeId"], link["dstNodeId"]) for link in topology["links"]}
     clock = summary["clock"]
     for row in rows(run / "batches.jsonl"):

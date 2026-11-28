@@ -1,0 +1,38 @@
+[
+  {
+    "time": 25,
+    "eventType": "link_param_change",
+    "attrs": {
+      "linkId": "EAST-HUB",
+      "bandwidthBps": 160000
+    }
+  },
+  {
+    "time": 40,
+    "eventType": "service_adjust",
+    "attrs": {
+      "op": "add",
+      "serviceId": "GAUGE",
+      "serviceType": "sensor_reading",
+      "category": "test",
+      "srcNodeId": "WEST",
+      "dstNodeId": "HUB",
+      "priority": 5,
+      "requirement": {
+        "bandwidthBps": 48000,
+        "delayMs": 100,
+        "jitterMs": 30,
+        "ber": 0.00001,
+        "packetLossRate": 0.03
+      }
+    }
+  },
+  {
+    "time": 55,
+    "eventType": "link_param_change",
+    "attrs": {
+      "linkId": "EAST-HUB",
+      "bandwidthBps": 2400000
+    }
+  }
+]

@@ -17,7 +17,8 @@ def host_roles():
     return packet_roles
 
 
-def from_observation(conditions, state, expected_diagnosis, plan, request, host_config):
+def replay_diagnosis(conditions, state):
+    """Rebuild the OM view using the archived grant and the reports delivered by this tick."""
     roles = host_roles()
     grant = conditions["authority"]
     allowed = None if grant["discovery"] == "all_delivered_registered" else grant["allowedServiceIds"]
@@ -27,13 +28,22 @@ def from_observation(conditions, state, expected_diagnosis, plan, request, host_
     allowed, protected = agents.scopes(state)
     snapshot, ledger = roles._model(state, waterline, allowed - protected)
     config = roles._configuration(protected, snapshot)
-    diagnosis = roles._diagnose(state, snapshot, ledger, config, allowed, protected)
+    # Older runs delivered the same probes but could not open a destination-stop order.
+    # Use their sealed producer inventory; replay must not retroactively grant that authority.
+    allow_source_stop = "src/packet/destination_guard.py" in conditions.get("implementationSha256", {})
+    diagnosis = roles._diagnose(state, snapshot, ledger, config, allowed, protected,
+                                allow_source_stop=allow_source_stop)
     diagnosis["authority_mode"] = "all_arrived_registered" if agents.allowed is None else "explicit_whitelist"
+    return roles, snapshot, config, ledger, diagnosis, agents.policy_hash
+
+
+def from_observation(conditions, state, expected_diagnosis, plan, request, host_config):
+    roles, snapshot, config, ledger, diagnosis, policy_hash = replay_diagnosis(conditions, state)
     fields = {k:expected_diagnosis.get(k) for k in diagnosis}
     held = roles._conditional_reservations(state, diagnosis["authority"])
     if (request.get("conditionalReservations", {}) != held or fields != diagnosis
             or request["authority"] != diagnosis["authority"] or request["snapshot"] != snapshot
-            or host_config != config or plan["policy_hash"] != agents.policy_hash
+            or host_config != config or plan["policy_hash"] != policy_hash
             or plan["authorized"] != diagnosis["authority"]["executableServiceIds"]
             or state["now_ns"] != plan["time_ns"]):
         raise ValueError("Rule input differs from the sealed OM observation, grant, host config or policy")

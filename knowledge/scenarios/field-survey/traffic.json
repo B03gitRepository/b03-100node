@@ -1,0 +1,27 @@
+{
+  "schema": "project-traffic-activity-v1",
+  "realtime_types": [
+    "sensor_reading"
+  ],
+  "profiles": {
+    "survey": {
+      "active_service_ids": [
+        "MAP"
+      ]
+    }
+  },
+  "profile_windows": [
+    {
+      "start_s": 0,
+      "end_s": 80,
+      "profile": "survey"
+    }
+  ],
+  "temporary_windows": [
+    {
+      "service_id": "GAUGE",
+      "start_s": 40,
+      "end_s": 80
+    }
+  ]
+}

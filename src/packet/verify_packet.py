@@ -64,6 +64,37 @@ def demand_original(row):
             row["ber_limit"], row["loss_limit"])
 
 
+def verify_service_definitions(conditions, summary, initial, events):
+    """Check the selected request definitions against initial demands and scripted additions."""
+    raw = {row["serviceId"]: row for row in initial}
+    for event in events:
+        if event["eventType"] == "service_adjust":
+            row = event["attrs"]
+            if row.get("op") != "add" or row["serviceId"] in raw:
+                raise ValueError("Unsupported or duplicate archived service change")
+            raw[row["serviceId"]] = row
+    custom = conditions.get("sceneOrigin") == "custom"
+    key = "serviceDefinitions" if custom else "officialDefinitions"
+    definitions = conditions[key]
+    if custom and (set(definitions) != set(conditions["services"]) or summary["sourceDefinitions"] != definitions
+                   or len(initial) != conditions["initialServiceCount"] or len(events) != conditions["eventCount"]):
+        raise ValueError("Custom workload differs from its recorded inventory")
+    for sid, definition in definitions.items():
+        row = raw.get(sid)
+        fields = ("serviceId", "srcNodeId", "dstNodeId", "serviceType", "category", "priority") if custom else ("priority",)
+        if row is None or any(row.get(k) != definition.get(k) for k in fields):
+            raise ValueError("Archived service definition differs from its source: " + sid)
+        req = row["requirement"]
+        # The native reader accepts both bandwidth spellings and stores time limits in seconds.
+        expected = {"bandwidthBps": req.get("bandwidthBps", req.get("bandwitdhBps")),
+                    "delayMs": formula.seconds_to_ms(req["delayMs"] / 1000),
+                    "jitterMs": formula.seconds_to_ms(req["jitterMs"] / 1000),
+                    "ber": req["ber"], "packetLossRate": req["packetLossRate"]}
+        if definition["requirement"] != expected:
+            raise ValueError("Archived QoS limits differ from the service source: " + sid)
+    return key, definitions
+
+
 def sample_graph(endpoints, latest, stamp, ttl):
     graph = {}
     for lid, (a, b) in endpoints.items():
@@ -104,6 +135,7 @@ def verify(run, *, strict_source=False, components=None, checkpoint=None, tokeni
     if not __debug__: raise RuntimeError("Verification requires ordinary Python assertions")
     cond,summary=load(run/"CONDITIONS.json"),load(run/"SUMMARY.json")
     from integrity import check_archive
+    from scenario_manifest import archive_input
     verification = check_archive(run, cond, strict_source=strict_source, components=components,
                                  checkpoint=checkpoint, tokenizer=tokenizer, simulator=simulator)
     if "competitionMetrics" in summary or (cond.get("simulatorRuntime") and cond["mode"] == "workorder"):
@@ -114,19 +146,11 @@ def verify(run, *, strict_source=False, components=None, checkpoint=None, tokeni
     exe=list(lines(run/"executions.jsonl"));routes=list(lines(run/"routes.jsonl"));bus=list(lines(run/"business-intervals.jsonl"))
     from simulator_ports import verify_ports
     verify_ports(run, cond, summary, ct, exe, bus)
-    packet=summary["afterDrain"];sc=run/"input";topo=load(sc/"net-topo.json")
-    script=cond["script"]
-    for key in ("net-topo.json", "bg-service.json", f"scripts/script-{script}.json"):
-        assert sha(sc/key)==cond["sourceHashes"][key], key
+    packet=summary["afterDrain"];topo=load(archive_input(run, "topology", cond))
     assert len(topo["nodes"])==cond["nodeCount"] and len(topo["links"])==cond["linkCount"]
     endpoints={l["linkId"]:(l["srcNodeId"],l["dstNodeId"]) for l in topo["links"]}
-    orig={s["serviceId"]:s for s in load(sc/"bg-service.json")}
-    for e in load(sc/f"scripts/script-{script}.json"):
-        if e["eventType"]=="service_adjust" and e["attrs"].get("op")=="add":
-            orig[e["attrs"]["serviceId"]]=e["attrs"]
-    defs=cond["officialDefinitions"]
-    for sid, d in defs.items():
-        assert sid in orig and orig[sid]["priority"]==d["priority"] and orig[sid]["requirement"]==d["requirement"]
+    defs_key,defs=verify_service_definitions(cond, summary, load(archive_input(run, "initial_services", cond)),
+                                            load(archive_input(run, "events", cond)))
     clocks=summary["clock"]; assert bus and bus[0]["start_ns"]==clocks["start_ns"] and bus[-1]["end_ns"]==clocks["end_ns"]
     assert all(x["end_ns"]==y["start_ns"] for x,y in zip(bus,bus[1:]))
     payload_bytes = cond.get("formulaBinding", {}).get("effective", {}).get("payloadBytes", formula.PAYLOAD_BYTES)
@@ -179,6 +203,8 @@ def verify(run, *, strict_source=False, components=None, checkpoint=None, tokeni
                 assert sid in first_report and first_report[sid]<=entry["time_ns"],("future ID",sid,entry["time_ns"])
                 visibility.setdefault(sid,entry["time_ns"])
     causal=Counter()
+    from queue_evidence import verify_queue_evidence
+    verify_queue = verify_queue_evidence(cond, summary, ct, acts, endpoints, lines(run / "packets-control.jsonl"))
     for y in (z for z in acts if z["event"]=="b03_observation_evidence"):
         state=y["state"]; now=y["time_ns"]
         content=json.dumps(state,sort_keys=True,separators=(",",":"),ensure_ascii=True,allow_nan=False).encode("utf-8")
@@ -193,8 +219,14 @@ def verify(run, *, strict_source=False, components=None, checkpoint=None, tokeni
                     continue
                 actual=probe_index[lid,node,ref["seq"]]
                 assert actual["time_ns"]==ref["received_at_ns"] and actual["probe"]["observed_at_ns"]==ref["sampled_at_ns"]<=ref["received_at_ns"]<=now
+                if verify_queue:
+                    assert ref["queue_packets"] == actual["probe"]["link"]["queue_packets"]
                 causal[ref["status"]+"Endpoint"]+=1
                 if ref["status"]=="stale":assert not row["usable"]
+            if verify_queue:
+                fresh_depths = [ref["queue_packets"] for ref in row["reports"].values()
+                                if ref is not None and ref["status"] == "fresh"]
+                assert row.get("queue_packets") == max(fresh_depths, default=None)
         for sid,row in state["services"].items():
             actual=demand_index[sid,row["seq"]]
             assert actual["time_ns"]==row["received_at_ns"] and actual["message"]["observed_at_ns"]==row["observed_at_ns"]<=row["received_at_ns"]<=now
@@ -307,11 +339,20 @@ def verify(run, *, strict_source=False, components=None, checkpoint=None, tokeni
             latency[kind].append(pk["time_ns"]-pk["created_at_ns"])
     from lifecycle_evidence import check_lifecycle
     lifecycle = check_lifecycle(plans, acts, demand_index, cond, probe_index)
-    from tech_knowledge import verify_work_order_queries
+    if any(plan.get("source_stop") for plan in plans):
+        from destination_guard import verify_source_stops
+        verification["verifiedSourceStopOrders"] = verify_source_stops(plans, acts, probe_index, demand_index, cond)
+    from knowledge.replay import verify_work_order_queries
     knowledge_queries = verify_work_order_queries(cond, acts)
+    if mode == "workorder":
+        from knowledge.agent_facts import verify_agent_facts
+        catalog = load(run / "network-foundation.json") if "networkFoundation" in cond else None
+        checked = verify_agent_facts(catalog, acts, cond["rcPolicy"], (cond.get("components") or {}).get("model"))
+        if catalog is not None:
+            verification["agentNetworkFoundation"] = checked
     return {"verification":verification,"lifecycle":lifecycle, **({"knowledgeQueries": knowledge_queries, "competitionMetrics": summary["competitionMetrics"]} if "competitionMetrics" in summary else {}),"scene":cond["scene"],"nodes":len(topo["nodes"]),"links":len(topo["links"]),"run":run.name,"mode":mode,"summarySha256":sha(run/"SUMMARY.json"),"business":summary["business"],
             "packets":packet,"authorizedConditions":cond["authority"],"code":cond.get("implementationSha256"),"seed":summary["seed"],"clock":clocks,"engine":summary.get("b03LoopStatus"),
-            "afterQA":summary["releaseVerifiedAfterRun"],"nativeInputCondition":{key:cond[key] for key in ["originalConfigSha256","sourceHashes","simulation","officialDefinitions"]},
+            "afterQA":summary["releaseVerifiedAfterRun"],"nativeInputCondition":{key:cond[key] for key in ["originalConfigSha256","sourceHashes","simulation",defs_key]},
             "nativeReports":len(reports),"firstServiceReportNs":first_report,"firstPolicyVisibilityNs":visibility,"causalEvidenceChecks":dict(causal),"plansWithIncompleteLinkGraph":missing_samples,"acceptedPathChecks":good_count,
             "originalQosAndRoute":route_evidence,"physicalActivations":activated,"verifiedDeviceQueryCount":len(reads),
             "openingAdmission":[z["solver_audit"]["openingAdmission"] for z in plans if "openingAdmission" in z.get("solver_audit",{})],
@@ -320,5 +361,3 @@ def verify(run, *, strict_source=False, components=None, checkpoint=None, tokeni
             "selectionWallNs":sum(ch["selectionWallNs"] for ch in selections),"solverWallNs":sum(z.get("solver_wall_ns",0) for z in plans),"a2aRpcWallNsInclusive":sum(z["wall_ns"] for z in rpc),"roleExchanges":len(rpc),"roleKinds":dict(Counter(x["kind"] for x in rpc)),"eventCounts":dict(tally),
             "work":work,"blockedAck":held,"networkPacketLatencyNs":{k:{"count":len(v),"sum":sum(v),"max":max(v)} for k,v in latency.items()},
             "sources":{p.name:sha(p) for p in run.iterdir() if p.is_file() and p.suffix in [".json",".jsonl"]}}
-
-

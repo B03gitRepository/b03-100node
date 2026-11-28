@@ -1,0 +1,16 @@
+{
+  "extends": "components.json",
+  "model": {
+    "id": "b03.foundation-selector",
+    "version": "1.0.0",
+    "mode": "frozen",
+    "entrypoint": "foundation_policy:build_model",
+    "symbols": [
+      "B",
+      "I"
+    ],
+    "options": {
+      "acceptNetworkFoundation": true
+    }
+  }
+}

@@ -1,4 +1,4 @@
 * text=auto eol=lf
 
 # Keep upstream packet source byte-identical to the runtime lock.
-simulator/resnet_py/** -text !eol
+simulator/resnet_py/** -text !eol whitespace=trailing-space,space-before-tab,cr-at-eol

@@ -75,7 +75,12 @@ def read_manifest(path, ancestors=(), *, inputs=None, allow_missing=False):
                 inputs.update(map(Path, registration["assets"].values()))
     if parent:
         base = read_manifest(path.parent / parent, (*ancestors, path), inputs=inputs, allow_missing=allow_missing)
-        return merged(base, value)
+        result = merged(base, value)
+        # Each port has one query. Its child declaration replaces the whole selector.
+        bindings = knowledge.get("bindings") if isinstance(knowledge, dict) else None
+        if isinstance(bindings, dict):
+            result["knowledge"]["bindings"].update(deepcopy(bindings))
+        return result
     return value
 
 
@@ -103,6 +108,9 @@ class ComponentSet:
         self.simulator = value.setdefault("simulator", dict(DEFAULT_SIMULATOR))
         self.model, self.rules, self.knowledge = (value[k] for k in ("model", "rules", "knowledge"))
         self.knowledge.setdefault("entrypoint", "builtin")
+        if "bindings" in self.knowledge:
+            from knowledge_ports import configured
+            configured(self.knowledge)
         for part in (self.model, self.rules, self.simulator, self.knowledge):
             if not all(isinstance(part.get(k), str) and part[k].strip() for k in ("id", "version")):
                 raise ValueError("Each component requires an ID and a release version")

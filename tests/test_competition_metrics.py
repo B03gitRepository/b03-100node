@@ -4,7 +4,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+ROOT = Path(__file__).resolve().parents[1]
+sys.path[:0] = [str(ROOT), str(ROOT / "src")]
 from competition_metrics import accept_report, distribution, records, sensed_events
 
 
@@ -47,6 +48,25 @@ class CompetitionMetricsTests(unittest.TestCase):
             self.assertEqual(list(records(path, optional=True)), [])
             with self.assertRaises(FileNotFoundError):
                 list(records(path))
+
+    def test_peer_evidence_is_fresh_attributed_and_requires_a_live_port(self):
+        rec = {"index": 0, "type": "node_offline", "entity": "b", "eventNs": 10,
+               "cutoffNs": 100, "samples": {}, "evidenceArrivedNs": None, "attrs": {}}
+        windows = {"b": [rec]}
+        row = probe("a", "b", 12, 14)
+        row["probe"]["link"].update(admin_up=False, endpoint_online=False)
+        accept_report(windows, row, 10, peer_evidence=True)
+        self.assertIsNone(rec["evidenceArrivedNs"])
+        row["probe"]["link"]["admin_up"] = True
+        accept_report(windows, row, 10)  # Previous editions only scored direct evidence.
+        accept_report(windows, {**row, "time_ns": 24}, 10, peer_evidence=True)
+        self.assertIsNone(rec["evidenceArrivedNs"])
+        accept_report(windows, row, 10, peer_evidence=True)
+        result = sensed_events(windows, 30)[0]
+        self.assertEqual(result["delayNs"], 4)
+        self.assertEqual(result["status"], "observed_by_neighbor")
+        self.assertEqual(result["neighborLink"], "edge")
+        self.assertEqual(result["evidence"], {"a": [12, 14]})
 
     def test_business_and_connectivity_are_recomputed_from_scored_intervals(self):
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "packet"))

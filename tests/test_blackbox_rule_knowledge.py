@@ -33,20 +33,24 @@ def synthetic_state():
             "retained_wire_bps":{},"link_ttl_ns":1000}
 
 
-def scenario(*, scope=None, budget=None, method="X", ports=None, hold_patch=False, delayed=False, state=None, response=None):
-    c = load_components(ROOT/"config/collab-rules-knowledge.json").activate(method)
-    reg = c.rules["options"]["customTools"]["X"]
+def scenario(*, scope=None, budget=None, method="X", ports=None, hold_patch=False, delayed=False, state=None, response=None,
+             profile="collab-rules-knowledge.json", bindings=None, network_foundation=None, model_options=None, checkpoint=None):
+    c = load_components(ROOT/"config"/profile).activate(method)
     if scope:
-        reg["scope"] = scope
+        c.rules["options"]["customTools"]["X"]["scope"] = scope
     if budget:
-        reg["budget"] = "case"
+        c.rules["options"]["customTools"]["X"]["budget"] = "case"
         c.rules["options"]["outputBudgets"] = {"case":budget}
-    if ports is not None:
+    if bindings is not None:
+        c.knowledge["bindings"] = deepcopy(bindings)
+    elif ports is not None:
         c.knowledge["bindings"] = {k:{"topic":"detour guidance"} for k in ports}
-    chooser = DecisionPolicy(method, components=c)
+    if model_options is not None:
+        c.model.setdefault("options", {}).update(model_options)
+    chooser = DecisionPolicy(method, checkpoint=checkpoint, components=c)
     state = deepcopy(state) if state is not None else synthetic_state()
     roster = sorted(state["services"])
-    agents = _PacketAgents(roster,[],0,chooser)
+    agents = _PacketAgents(roster,[],0,chooser,network_foundation)
     snapshot = digest(state)
     wid = "example-order"
     captured = {}

@@ -1,0 +1,18 @@
+{
+  "id": "CASE001",
+  "title": "管理探针缺报",
+  "publishedEdition": "1.2.0",
+  "observedAtController": "控制端持续缺少同一上报端的新鲜探针，相关链路缺少本轮完整观测。",
+  "retrospectiveEvidence": {
+    "finding": "事后逐包轨迹在同一转发队列记录 792 次探针因队列已满被丢弃。",
+    "probeDropsChecked": 792
+  },
+  "example": "在合成链路 edge-a 上缺少端点 B 的新探针时，记录最后送达时间，等待补报或独立包轨迹。",
+  "limits": "在线诊断可确认缺报。判断丢弃位置和原因需要该回合的独立报文记录。",
+  "source": {
+    "recordId": "CASE001",
+    "evidenceKind": "packet-trace-extract",
+    "extractSha256": "4ae529b08162cf4bac161a0dade55c7ad208f71829ea8c427efde19208622f06",
+    "recordSha256": "0e57ff876523502f72ef54c81ec95ee584172ac5132254948cec1cad2a4f5bfc"
+  }
+}

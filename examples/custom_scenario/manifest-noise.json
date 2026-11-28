@@ -1,0 +1,5 @@
+{
+  "schema": "b03.network-reference.v1",
+  "network": "field-survey",
+  "manifest": "manifest.json"
+}

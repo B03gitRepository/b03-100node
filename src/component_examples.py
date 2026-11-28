@@ -17,7 +17,11 @@ def knowledge_example(conditions, components):
         if not identity:
             return {"input": {"id": identifier}, "output": None, "status": "knowledge-unrecorded"}
         edition = identity["version"]
-        candidates = [components.knowledge_path] if components else sorted((ROOT / "knowledge").glob("*.json"))
+        if components:
+            candidates = [components.knowledge_path]
+        else:
+            knowledge = ROOT / "knowledge"
+            candidates = [*knowledge.glob("*.json"), *(knowledge / "editions").glob("*.json")]
         source = next((path for path in candidates if path.is_file() and sha256(path) == identity["sha256"]), None)
         if source is None:
             return {"input": {"id": identifier, "version": edition}, "output": None,

@@ -15,6 +15,8 @@ from types import SimpleNamespace
 import uuid
 
 from packet_a2a import PacketA2A, digest
+from destination_guard import choose_source_stop
+from knowledge_ports import accepts_model, accepts_rules, check_om_advice, lookup
 from b03_formulas import DEFAULT_TTL_NS as OBSERVATION_TTL_NS
 from resnet.control.observation import SERVICE_FIELDS, describe_service
 from b03_formulas import wire_bps as required_wire_bps
@@ -70,6 +72,7 @@ def _delivered_probe(report, *, lid, nid, peer, now, ttl):
     return {"status": "fresh" if formula.fresh_sample(sampled, arrived, now, ttl) else "stale",
             "sampled_at_ns": sampled, "received_at_ns": arrived, "seq": p["seq"], "version": p["version"],
             "node_online": p["node_online"], "admin_up": q["admin_up"], "endpoint_online": q["endpoint_online"],
+            **({"queue_packets": q["queue_packets"]} if "queue_packets" in q else {}),
             **{k: q[k] for k in METRICS}}
 
 
@@ -83,6 +86,12 @@ def _project_links(now_ns, snapshot):
         reports = {nid: _delivered_probe(row.get("reporters", {}).get(nid), lid=lid, nid=nid,
                                          peer=peer, now=now_ns, ttl=ttl) for nid, peer in ((a, b), (b, a))}
         link = {"src_node_id": a, "dst_node_id": b, "reports": reports, "usable": False}
+        depths = [r["queue_packets"] for r in reports.values()
+                  if r is not None and r["status"] == "fresh" and "queue_packets" in r]
+        if depths:
+            link["queue_packets"] = max(depths)
+        if "queue_pressure" in row:
+            link["queue_pressure"] = row["queue_pressure"]
         if any(v is None for v in reports.values()) or row["reason"] == "future_snapshot_time":
             link["reason"] = "missing_endpoint_observation"
         elif any(v["status"] == "stale" for v in reports.values()):
@@ -294,7 +303,7 @@ def _model(state, headroom, permitted):
     return snapshot, ledger
 
 
-def _diagnose(state, snapshot, ledger, config, allowed, protected):
+def _diagnose(state, snapshot, ledger, config, allowed, protected, network_facts=None, *, allow_source_stop=True):
     authority = default_authority(snapshot, config)
     details = assess(snapshot["nodes"], snapshot["links"], snapshot["requests"],
                      snapshot["assignments"], snapshot["observedAtSec"])["services"]
@@ -369,9 +378,19 @@ def _diagnose(state, snapshot, ledger, config, allowed, protected):
         # These fresh, verified old epochs can retire now. Other maintenance
         # and active work acquire their own authority on the next snapshot.
         authorized, refresh = expiring, []
+    elif allow_source_stop and (stop := choose_source_stop(state, allowed - protected, healthy)):
+        # An online source can acknowledge its own stop even when an offline
+        # destination cannot confirm cleanup. No install can spend this reservation.
+        sid = stop["service_id"]
+        for item in rows.values():
+            item["authorized"] = False
+        rows[sid].update(status="destination_offline_source_stop", authorized=True, requires_refresh=False)
+        lifecycle["source_stop"] = stop
+        authorized, refresh = [sid], []
     authority.update(policyId="b03.packet.reported-failure-and-admission.v1",
                      policyVersion="wire-shared-healthy-freeze.v1", executableServiceIds=authorized)
-    return {"authority": authority, "services": rows, "refresh_ids": refresh,
+    baseline = {"networkBaseline": network_facts.compare_reports(state)} if network_facts is not None else {}
+    return {"authority": authority, "services": rows, "refresh_ids": refresh, **baseline,
             "held_confirmed": sorted(set(state["confirmed"]) - set(authorized)),
             "protected_ids": sorted(protected), "allowed_ids": sorted(allowed), **lifecycle}
 
@@ -455,24 +474,35 @@ def _resource(work_id, state, model, ledger, config, diagnosis, policy_hash, cho
     writable = diagnosis["authority"]["executableServiceIds"]
     selection = {"method": "lifecycle", "selected": None, "selectionWallNs": 0, "modelCalled": False}
     component_meta = {}
+    if "networkBaseline" in diagnosis:
+        component_meta["rc_network_baseline_digest"] = digest(diagnosis["networkBaseline"])
+    if "knowledgeContext" in diagnosis:
+        # Record exactly what the RC decision function received, including empty matches.
+        component_meta["rc_knowledge_input_ids"] = [entry["id"] for entry in diagnosis["knowledgeContext"]]
     rules = None
     rule_context = None
     knowledge = None
-    from knowledge_ports import accepts_model, lookup
     components = getattr(chooser, "components", None)
     contexts = {"om":om_advice} if om_advice is not None else {}
     lifecycle = diagnosis.get("lifecycle_release")
-    run_rule = bool(writable) and lifecycle is None
-    if lifecycle:
+    source_stop = diagnosis.get("source_stop")
+    run_rule = bool(writable) and not (lifecycle or source_stop)
+    if lifecycle or source_stop:
         target = deepcopy(model["assignments"])
-        for sid in lifecycle["release_ids"]:
+        release_ids = lifecycle["release_ids"] if lifecycle else [source_stop["service_id"]]
+        for sid in release_ids:
             target[sid] = None
         audit = validate_proposal(model, config, b["authority"], target)
-        if not audit["valid"] or audit["changedServiceIds"] != lifecycle["release_ids"]:
-            raise ValueError("Invalid controller lifecycle release")
-        audit.update(solverStatus="controller_lifecycle_release", action=None, pathSearch={},
+        logical_releases = [sid for sid in release_ids if model["assignments"].get(sid) is not None]
+        if not audit["valid"] or audit["changedServiceIds"] != logical_releases:
+            raise ValueError("Invalid controller source release")
+        audit.update(solverStatus="controller_lifecycle_release" if lifecycle else "destination_offline_source_stop", action=None, pathSearch={},
                      globallyOptimal=False, targetHash=digest(target))
-        component_meta["lifecycle_release"] = lifecycle
+        if lifecycle:
+            component_meta["lifecycle_release"] = lifecycle
+        else:
+            component_meta["source_stop"] = source_stop
+            selection["method"] = "source_stop"
     elif run_rule:
         from rule_component import begin_sample, external_rules
         rules = external_rules(chooser)
@@ -486,20 +516,28 @@ def _resource(work_id, state, model, ledger, config, diagnosis, policy_hash, cho
             timing["setupWallNs"] = time.perf_counter_ns() - rc_start
         if (components and getattr(chooser, "actor", None) is not None
                 and accepts_model(components.model, chooser.identity)):
-            advice = lookup(components, "model", work_id, b["identity"]["sourceSnapshotHash"], state["now_ns"])
+            advice = lookup(components, "model", work_id, b["identity"]["sourceSnapshotHash"], state["now_ns"],
+                            om_advice=om_advice)
             if advice is not None:
                 contexts["model"] = advice
         catalog = (enumerate_actions(model, b["authority"], config) if rules is None
                    else rules.catalog(b, timing))
         offered = tuple(a["id"] for a in catalog) if rules is not None else ()
+        # RC verified the whole OM handoff. Each decision port receives only its own registered inputs.
+        decision_diagnosis = diagnosis
+        if "knowledgeContext" in diagnosis or "networkBaseline" in diagnosis:
+            decision_diagnosis = dict(diagnosis)
+            decision_diagnosis.pop("knowledgeContext", None)
+            if not chooser.identity.get("networkFoundationHook"):
+                decision_diagnosis.pop("networkBaseline", None)
         if "model" in contexts:
-            action, selection = chooser.select(catalog, state, model, ledger, diagnosis, config,
+            action, selection = chooser.select(catalog, state, model, ledger, decision_diagnosis, config,
                                                knowledge_context=contexts["model"]["output"])
         else:
-            action, selection = chooser.select(catalog, state, model, ledger, diagnosis, config)
-        from knowledge_ports import accepts_rules
+            action, selection = chooser.select(catalog, state, model, ledger, decision_diagnosis, config)
         if components and accepts_rules(components.rules, action["id"]):
-            advice = lookup(components, "rules", work_id, b["identity"]["sourceSnapshotHash"], state["now_ns"])
+            advice = lookup(components, "rules", work_id, b["identity"]["sourceSnapshotHash"], state["now_ns"],
+                            om_advice=om_advice)
             if advice is not None:
                 contexts["rules"] = advice
                 b["knowledgeContext"] = advice["output"]
@@ -560,6 +598,8 @@ def _resource(work_id, state, model, ledger, config, diagnosis, policy_hash, cho
         row = state["services"][sid]
         reason = ("reported_inactive" if diagnosis["services"][sid]["status"] == "reported_inactive"
                   else "no_feasible_b03_candidate")
+        if source_stop:
+            reason = "destination_offline_source_stop"
         choices[sid] = _choice(row["service"], target[sid], state["links"],
                                revision=row["revision"], reason=reason)
         # Guard the packet contract's strict threshold comparison as well as B03's EPS.
@@ -598,7 +638,7 @@ def _resource(work_id, state, model, ledger, config, diagnosis, policy_hash, cho
         if timing["chargedComponentWallNs"] < 0:
             raise ValueError("Component and native decision clocks disagree")
         decision = charged
-    elif lifecycle:
+    elif lifecycle or source_stop:
         decision = time.perf_counter_ns() - rc_start
     if om_advice is not None:
         # The OM port runs before RC starts its clock.
@@ -856,8 +896,16 @@ def _verify_order(work_id, saved, state, receipts, expected, operations):
 class _PacketAgents:
     """Role endpoints see detached JSON and their immutable policy. Neither role owns a writer."""
 
-    def __init__(self, allowed, protected, headroom, chooser):
+    def __init__(self, allowed, protected, headroom, chooser, network_foundation=None):
         self.chooser = chooser
+        self.network_facts = None
+        if network_foundation is not None:
+            from knowledge.agent_facts import AgentNetworkFacts
+            self.network_facts = AgentNetworkFacts(network_foundation)
+            if chooser.identity.get("networkFoundationHook"):
+                chooser.actor.set_network_foundation(self.network_facts.export())
+        elif chooser.identity.get("networkFoundationHook") and getattr(chooser, "actor", None) is not None:
+            raise ValueError("This model requires a startup network foundation; select --foundation, --network or --scenario")
         self.allowed = None if allowed is None else frozenset(allowed)
         self.protected = frozenset(protected)
         self.headroom = headroom
@@ -890,23 +938,26 @@ class _PacketAgents:
         allowed, protected = self.scopes(state)
         model, ledger = _model(state, self.headroom, allowed - protected)
         config = _configuration(protected, model)
-        diagnosis = _diagnose(state, model, ledger, config, allowed, protected)
+        diagnosis = _diagnose(state, model, ledger, config, allowed, protected, self.network_facts)
         diagnosis["authority_mode"] = "all_arrived_registered" if self.allowed is None else "explicit_whitelist"
         if kind == "control_request":
             received = p.get("om_advisory")
+            check_om_advice(getattr(self.chooser, "components", None), wid, request["snapshot_id"],
+                            state, diagnosis, received)
             expected = diagnosis if received is None else dict(diagnosis, knowledgeContext=received["output"])
             if expected != p["diagnosis"] or not request["parent_message_id"]:
                 raise ValueError("RC cannot reproduce OM authority on this snapshot")
-            result = _resource(wid, state, model, ledger, config, diagnosis, self.policy_hash,
-                               self.chooser, p.get("om_advisory"))
+            # The RC planner and selector receive the verified diagnosis sent by OM, with its knowledge.
+            result = _resource(wid, state, model, ledger, config, p["diagnosis"], self.policy_hash,
+                               self.chooser, received)
             if "reassessment_after_release" in p:
                 result["reassessment_after_release"] = p["reassessment_after_release"]
             return result
         if kind != "observe":
             raise ValueError("Unknown packet role operation")
         data = {"state": state, "policy_hash": self.policy_hash, "diagnosis": diagnosis}
-        from knowledge_ports import lookup
-        advisory = lookup(getattr(self.chooser, "components", None), "om", wid, request["snapshot_id"], state["now_ns"])
+        advisory = lookup(getattr(self.chooser, "components", None), "om", wid, request["snapshot_id"],
+                          state["now_ns"], diagnosis=diagnosis, state=state)
         if advisory is not None:
             diagnosis = dict(diagnosis, knowledgeContext=advisory["output"])
             data.update(diagnosis=diagnosis, om_advisory=advisory)
@@ -921,6 +972,11 @@ class _PacketAgents:
                 or projected != res["wire_ledger"]["proposed_wire_bps"]):
             raise ValueError("OM rejected release, install or wire accounting beyond the rule patch")
         lifecycle = diagnosis.get("lifecycle_release")
+        stop = diagnosis.get("source_stop")
+        if res.get("source_stop") != stop or (stop and (
+                releases != [stop["service_id"]] or res["release_ids"] != releases
+                or res["install_ids"] or res["refresh_ids"])):
+            raise ValueError("OM rejected source stop outside the reported outage or epoch")
         if (res.get("lifecycle_release") != lifecycle
                 or (lifecycle and (res["release_ids"] != lifecycle["release_ids"] or res["install_ids"]))
                 or res.get("reassessment_after_release") != p.get("reassessment_after_release")):
@@ -949,10 +1005,11 @@ class PacketRoles:
     """Controller port for work-order planning and verification from received cache copies."""
 
     def __init__(self, allowed_ids, log, *, control_headroom_fraction=formula.DEFAULT_HEADROOM, protected_ids=(),
-                 urls=None, run_id=None, chooser=None):
+                 urls=None, run_id=None, chooser=None, network_foundation=None):
         from frozen_policy import DecisionPolicy
         options = _packet_options(formula.PAYLOAD_BYTES, formula.EPOCH_BYTES, control_headroom_fraction)
-        self._agents = _PacketAgents(allowed_ids, protected_ids, options["control_headroom_fraction"], chooser or DecisionPolicy("I"))
+        self._agents = _PacketAgents(allowed_ids, protected_ids, options["control_headroom_fraction"],
+                                     chooser or DecisionPolicy("I"), network_foundation)
         self._log = log
         self._run = run_id or uuid.uuid4().hex
         self._seq = 0
@@ -970,6 +1027,7 @@ class PacketRoles:
         diagnosis = _diagnose(state, model, ledger, config, allowed, protected)
         row = diagnosis["services"].get(sid, {})
         return {"authorized": sid in state["confirmed"] and row.get("authorized") is True,
+                "source_stop": diagnosis.get("source_stop"),
                 "status": row.get("status", "demand_missing"), "requires_refresh": row.get("requires_refresh", False),
                 "refresh_required": row.get("requires_refresh", False), "snapshot_id": digest(state)}
 
@@ -990,6 +1048,10 @@ class PacketRoles:
     def plan(self, now_ns, links_snapshot, demands_snapshot, confirmed, retained_wire_bps, *,
              reassessment_after_release=None):
         state = _state(now_ns, links_snapshot, demands_snapshot, confirmed, retained_wire_bps)
+        if links_snapshot.get("controller_pending_cleanups"):
+            components = getattr(self._agents.chooser, "components", None)
+            if components and components.knowledge.get("bindings", {}).get("om", {}).get("from") == "diagnosis":
+                state["controller_pending_cleanups"] = list(links_snapshot["controller_pending_cleanups"])
         self._seq += 1
         wid = f"{self._run}-W{self._seq:06d}"
         payload = {} if reassessment_after_release is None else {"reassessment_after_release": reassessment_after_release}
@@ -1012,7 +1074,8 @@ class PacketRoles:
         from competition_metrics import latest_input_arrival
         self._log({"event": "b03_plan_evidence_clock", "time_ns": now_ns, "work_id": wid,
                    "snapshot_id": plan["snapshot_id"], "fresh_arrival_ns": latest_input_arrival(state)})
-        if (reassessment_after_release is not None or plan.get("knowledge_io") or plan.get("knowledge_contexts")
+        if (self._agents.network_facts is not None or reassessment_after_release is not None
+                or plan.get("knowledge_io") or plan.get("knowledge_contexts")
                 or plan.get("solver_audit",{}).get("rulePatch")
                 or plan["release_ids"] or plan["install_ids"] or plan["refresh_ids"]):
             self._log({"event": "b03_observation_evidence", "purpose": "plan", "time_ns": now_ns,

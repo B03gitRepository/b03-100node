@@ -9,16 +9,29 @@ def _text(value):
 
 
 def _entries(library, edition):
-    if (not isinstance(library, dict) or library.get("schema") != "b03.knowledge.v1"
+    if (not isinstance(library, dict) or library.get("schema") not in ("b03.knowledge.v1", "b03.knowledge.v2")
             or library.get("version") != edition or not isinstance(library.get("entries"), list)):
         raise ValueError("The configured technical knowledge edition differs from the source")
+    fields = ("id", "topics", "content", "sources", "applicability")
     entries = {}
     for row in library["entries"]:
         if (not isinstance(row, dict) or any(not _text(row.get(k)) for k in ("id", "content", "applicability"))
                 or any(not isinstance(row.get(k), list) or not row[k] or not all(_text(x) for x in row[k])
                        for k in ("topics", "sources")) or row["id"] in entries):
             raise ValueError("Incomplete or duplicate knowledge entry")
-        entry = {key: deepcopy(row[key]) for key in ("id", "topics", "content", "sources", "applicability")}
+        keys = fields
+        if library["schema"] == "b03.knowledge.v2":
+            # Plain technical notes keep their published shape. Diagnostic notes and cases
+            # also publish the evidence needed and the limits of the conclusion.
+            if "kind" in row:
+                keys = (*fields, "kind", "evidence", "limits")
+                if (row["kind"] not in ("diagnosis", "case") or not _text(row.get("limits"))
+                        or not isinstance(row.get("evidence"), list) or not row["evidence"]
+                        or not all(_text(item) for item in row["evidence"])):
+                    raise ValueError("Invalid diagnostic or case fields for " + row["id"])
+            if set(row) != set(keys):
+                raise ValueError("Unexpected knowledge fields for " + row["id"])
+        entry = {key: deepcopy(row[key]) for key in keys}
         entries[entry["id"]] = {**entry, "version": edition}
     return entries
 
@@ -32,9 +45,7 @@ def query_library(library, edition, *, identifier=None, topic=None):
     return [row for row in entries.values() if any(topic.casefold() in t.casefold() for t in row["topics"])]
 
 
-def _lookup(components, identifier, topic):
-    if (identifier is None) == (topic is None) or not _text(identifier if topic is None else topic):
-        raise ValueError("Select exactly one nonempty knowledge ID or topic")
+def _edition(components):
     reg = components.knowledge
     ranked = reg.get("contractVersion") == "b03.knowledge.lookup.v2"
     cached = getattr(components, "_ranked_knowledge", None) if ranked else None
@@ -54,7 +65,13 @@ def _lookup(components, identifier, topic):
             if source_hash != components.identity["knowledge"]["sha256"]:
                 raise ValueError("The knowledge source differs from its pinned edition")
             components._ranked_knowledge = cached
-    source_hash, entries, provider = cached
+    return cached
+
+
+def _lookup(components, identifier, topic):
+    if (identifier is None) == (topic is None) or not _text(identifier if topic is None else topic):
+        raise ValueError("Select exactly one nonempty knowledge ID or topic")
+    source_hash, entries, provider = _edition(components)
     if provider is not None:
         ids = provider.lookup(identifier=identifier, topic=topic)
     elif identifier is not None:
@@ -158,76 +175,6 @@ def opening_outcome(receipt, admission, choices, installs):
 
 
 def verify_work_order_queries(conditions, events):
-    """Replay lookup results and decision evidence from the sealed run, without importing providers."""
-    proof = conditions.get("provenance", {})
-    required = conditions.get("mode") == "workorder" and "knowledge" in proof.get("activeComponents", {})
-    plans = [r for r in events if r["event"] == "b03_rc_plan"]
-    if not required:
-        if any("knowledge_io" in r or "knowledge_contexts" in r for r in plans):
-            raise ValueError("Unregistered knowledge receipt")
-        return []
-    diagnoses = {r["work_id"]: r for r in events if r["event"] == "b03_om_diagnosis"}
-    observations = {r["work_id"]: r for r in events if r["event"] == "b03_observation_evidence"
-                    and r.get("purpose") == "plan"}
-    identity = _identity(conditions["components"])
-    edition = proof["knowledge"]
-    raw = edition["text"].encode("utf-8")
-    if (any(edition[k] != identity[k] for k in ("id", "version"))
-            or hashlib.sha256(raw).hexdigest() != identity["sourceSha256"]):
-        raise ValueError("Archived knowledge version or source differs")
-    wanted = query_library(json.loads(raw), identity["version"], identifier="K044")
-    mode = conditions["rcPolicy"]["initialAdmission"]
-    first = True
-    results = []
-    for plan in plans:
-        work = plan["work_id"]
-        admission = plan.get("solver_audit", {}).get("openingAdmission")
-        opening = first and bool(plan.get("real_solver_calls"))
-        if opening != (admission is not None):
-            raise ValueError("Opening evidence differs from the first authorized solver call")
-        if opening:
-            first = False
-        diagnosis = diagnoses[work]
-        pending = _pending(diagnosis, mode) if opening else []
-        record = plan.get("knowledge_io")
-        if bool(pending) != (record is not None):
-            raise ValueError("Opening knowledge query missing or outside its delivered trigger")
-        if not pending:
-            continue
-        observation = observations.get(work)
-        if (not observation or diagnosis["snapshot_id"] != plan["snapshot_id"]
-                or observation["snapshot_id"] != plan["snapshot_id"]
-                or observation["time_ns"] != plan["time_ns"] or diagnosis["time_ns"] != plan["time_ns"]
-                or set(plan["authorized"]) != set(diagnosis["authority"]["executableServiceIds"])
-                or admission["mode"] != mode):
-            raise ValueError("Opening knowledge query differs from its authorized observation")
-        question = _question(work, plan["snapshot_id"], observation["state"], diagnosis, mode,
-                             plan["tool_choice"]["selected"], pending)
-        expected = {"schema": "b03.packet.knowledge-io.v1", "input": question, "component": identity,
-                    "output": wanted}
-        if wanted:
-            retained = sorted(set(pending) - set(admission["missingAuthorized"]))
-            added = sorted(admission["applied"])
-            if (not set(added) <= set(plan["authorized"]) & set(admission["missingAuthorized"])
-                    or not set(added) <= set(admission["feasibleAdditions"]) or added and admission["heldBySelectedAction"]):
-                raise ValueError("K044 residual additions disagree with the authorized opening")
-            sample = plan.get("component_io")
-            if sample and retained != sorted(s for s in pending if sample["returned"]["target"][s] is not None):
-                raise ValueError("K044 retained paths differ from the recorded rule proposal")
-            checked = {s: plan["decisions"][s]["required_wire_bps"] for s in set(pending) & (set(retained) | set(added))}
-            expected["procedureCheck"] = {"status": "checked", "retainedPendingIds": retained,
-                                          "residualAddedIds": added, "pendingWireBps": checked}
-        else:
-            expected["procedureCheck"] = {"status": "entry_not_in_edition"}
-        expected["disposition"] = opening_outcome(expected, admission, plan["decisions"], plan["install_ids"])
-        if record != expected:
-            raise ValueError("Archived knowledge input, source, result or actual disposition differs")
-        results.append({"work": work, "id": question["id"], "version": identity["version"],
-                        "sourceSha256": identity["sourceSha256"], "pending": pending,
-                        "disposition": expected["disposition"]})
-    if conditions.get("receiptContract") in ("b03.packet.workorder.v2", "b03.packet.workorder.v3"):
-        from knowledge_ports import verify
-        results.extend(verify(conditions, events, _entries(json.loads(raw), identity["version"]), identity))
-    elif any("knowledge_contexts" in plan or "rulePatch" in plan.get("solver_audit", {}) for plan in plans):
-        raise ValueError("A v2 component record cannot be interpreted as a v1 work order")
-    return results
+    """Compatibility entry point for callers using the original src-only module."""
+    from knowledge_ports import verify_work_order_queries as replay
+    return replay(conditions, events)

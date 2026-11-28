@@ -86,6 +86,21 @@ class SimulatorRegistrationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "registered provider asset"):
             archived_engine_lock(self.root, record, {LOCK_MEMBER})
 
+    def test_bundled_and_historical_runtime_locks_are_distinct(self):
+        current = json.loads((ROOT / "config/simulator.lock.json").read_bytes())
+        prior = json.loads((ROOT / "simulator/locks/resnet-1.1.0.json").read_bytes())
+        self.assertEqual(set(prior), {"distribution", "version", "runtimeSha256", "files"})
+        self.assertTrue(all(path.startswith("src/resnet/") or path == "configs/common.json"
+                            for path in prior["files"]))
+        self.assertEqual(set(current["files"]), set(prior["files"]))
+        self.assertEqual(validate_engine_lock(prior)["version"], "1.1.0")
+        self.assertEqual(current["version"], "1.1.1")
+        self.assertNotEqual(prior["runtimeSha256"], current["runtimeSha256"])
+        self.assertEqual(verify_engine(ROOT / "simulator/resnet_py", current), current["runtimeSha256"])
+        self.assertEqual(archived_engine_lock(self.root, {"releaseManifestSha256": prior["runtimeSha256"]}, {}), prior)
+        with self.assertRaisesRegex(ValueError, "Unexpected simulator source"):
+            verify_engine(ROOT / "simulator/resnet_py", prior)
+
     def test_historical_release_uses_its_accepted_lock(self):
         legacy = {"releaseManifestSha256": "original"}
         lock = {"runtimeSha256": "original"}

@@ -1,0 +1,18 @@
+[
+  {
+    "serviceId": "MAP",
+    "serviceType": "map_tile",
+    "category": "background",
+    "srcNodeId": "FIELD",
+    "dstNodeId": "HUB",
+    "priority": 3,
+    "startAtSec": 0,
+    "requirement": {
+      "bandwidthBps": 320000,
+      "delayMs": 120,
+      "jitterMs": 30,
+      "ber": 0.00001,
+      "packetLossRate": 0.03
+    }
+  }
+]

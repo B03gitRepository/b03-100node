@@ -1,0 +1,13 @@
+{
+  "schema": "b03.custom-scenario.v1",
+  "version": "1.0.0",
+  "control": {
+    "controller_id": "HUB"
+  },
+  "window": {
+    "start": 0,
+    "end": 80,
+    "drain": 12
+  },
+  "services": "all"
+}

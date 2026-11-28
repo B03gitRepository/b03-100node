@@ -18,6 +18,7 @@ class TrafficSource:
         self.online = sim.state.node_online[service.src_node_id]
         self.epoch = 0
         self._timer = None
+        self._last_logged_rate = None
 
     def interval_ns(self):
         """向上取整，避免舍入后实际发送速率略高于配置速率。"""
@@ -51,8 +52,11 @@ class TrafficSource:
         if bps > self.sim.config['payload_bytes'] * 8 * 1_000_000_000:
             raise ValueError('该速率超过整数纳秒时钟精度')
         self.rate_bps = bps
-        self.sim.log('source-state', {'event': 'rate_update', 'time_ns': self.sim.now,
-                     'service_id': self.service.service_id, 'rate_bps': bps, 'epoch': self.epoch})
+        record = (self.sim.now, self.epoch, bps)
+        if record != self._last_logged_rate:
+            self.sim.log('source-state', {'event': 'rate_update', 'time_ns': self.sim.now,
+                         'service_id': self.service.service_id, 'rate_bps': bps, 'epoch': self.epoch})
+            self._last_logged_rate = record
         self._reschedule(self.interval_ns())  # 调速后等一个新间隔，不额外补发一个包。
 
     def _send(self):

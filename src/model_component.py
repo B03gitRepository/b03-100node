@@ -74,6 +74,15 @@ def load_model(components, checkpoint, tokenizer, device, frozen_actor):
     identity.update(kind="frozen-model" if native else "model-adapter", symbols=symbols,
                     adapterId=cfg["id"], adapterVersion=cfg["version"], entrypoint=cfg["entrypoint"],
                     catalogVersion=cfg["catalogVersion"], mode=cfg["mode"])
+    opted_in = cfg.get("options", {}).get("acceptNetworkFoundation", False)
+    if type(opted_in) is not bool:
+        raise ValueError("model.options.acceptNetworkFoundation must be a boolean")
+    if "networkFoundationHook" in identity and identity.pop("networkFoundationHook") is not opted_in:
+        raise ValueError("Model network foundation declaration differs from its explicit option")
+    if opted_in:
+        if native or not callable(getattr(actor, "set_network_foundation", None)):
+            raise ValueError("An opted-in external adapter must implement set_network_foundation(catalog)")
+        identity["networkFoundationHook"] = True
     return actor, identity
 
 

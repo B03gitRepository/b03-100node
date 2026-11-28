@@ -4,6 +4,7 @@ import json
 from math import isclose
 import b03_formulas as formula
 from pathlib import Path
+from scenario_manifest import archive_input
 
 
 def records(path, *, optional=False):
@@ -59,8 +60,7 @@ def service_matches(attrs, message):
 
 
 def event_windows(directory, conditions, start, end, stop):
-    script = conditions["script"]
-    obj = json.loads((directory / "input" / "scripts" / f"script-{script}.json").read_bytes())
+    obj = json.loads(archive_input(directory, "events", conditions, effective=True).read_bytes())
     events = obj if isinstance(obj, list) else obj["events"]
     windows = defaultdict(list)
     next_change = {}
@@ -70,19 +70,28 @@ def event_windows(directory, conditions, start, end, stop):
         limit = next_change.get(target, stop + 1)
         next_change[target] = stamp
         if start <= stamp < end:
+            attrs = event["attrs"]
+            if conditions.get("sceneOrigin") == "custom":
+                # The native reader accepts both spellings. Preserve older official receipt semantics.
+                qos = attrs.get("requirement", attrs)
+                if "bandwitdhBps" in qos and "bandwidthBps" not in qos:
+                    qos = {**qos, "bandwidthBps": qos["bandwitdhBps"]}
+                    attrs = {**attrs, "requirement": qos} if "requirement" in attrs else qos
             windows[target].append({"index": index, "type": event["eventType"], "entity": target,
                                     "eventNs": stamp, "cutoffNs": min(limit, stop + 1),
-                                    "evidenceArrivedNs": None, "samples": {}, "attrs": event["attrs"]})
+                                    "evidenceArrivedNs": None, "samples": {}, "attrs": attrs})
     return windows
 
 
-def accept_report(windows, row, ttl):
+def accept_report(windows, row, ttl, *, peer_evidence=False):
     if not row.get("result", {}).get("accepted"):
         return
     arrival = row["time_ns"]
     if row["event"] == "observation":
         report = row["probe"]
         keys = (report["link"]["link_id"], report["node_id"])
+        if peer_evidence:
+            keys += (report["link"]["peer_node_id"],)
     elif row["event"] == "service_observation":
         report = row["message"]
         keys = (report["service"]["service_id"],)
@@ -96,7 +105,8 @@ def accept_report(windows, row, ttl):
             if rec["evidenceArrivedNs"] is not None or not rec["eventNs"] <= sampled <= arrival < rec["cutoffNs"]:
                 continue
             kind, attrs = rec["type"], rec["attrs"]
-            if kind in ("link_param_change", "link_state") and row["event"] == "observation":
+            if (kind in ("link_param_change", "link_state") and row["event"] == "observation"
+                    and key == report["link"]["link_id"]):
                 link = report["link"]
                 match = (requested_fields_match(attrs, link, LINK_FIELDS) if kind == "link_param_change"
                          else link["admin_up"] == (attrs["state"] == "up"))
@@ -109,6 +119,12 @@ def accept_report(windows, row, ttl):
                 peer = rec["samples"].get(link["peer_node_id"])
                 if match and peer and arrival - peer[0] <= ttl:
                     rec["evidenceArrivedNs"] = arrival
+            elif (peer_evidence and kind == "node_offline" and row["event"] == "observation"
+                  and key == report["link"]["peer_node_id"] and report["node_online"]
+                  and report["link"]["admin_up"] and not report["link"]["endpoint_online"]):
+                rec["samples"][report["node_id"]] = (sampled, arrival)
+                rec["evidenceArrivedNs"] = arrival
+                rec["neighborLink"] = report["link"]["link_id"]
             elif ((kind in ("node_online", "node_offline") and row["event"] == "observation"
                    and report["node_id"] == key and report["node_online"] == (kind == "node_online"))
                   or (kind == "service_adjust" and row["event"] == "service_observation"
@@ -125,11 +141,14 @@ def sensed_events(windows, end):
             status = "observed" if arrived is not None else "no_matching_delivered_evidence"
             if rec["type"] == "node_move":
                 status = "coordinates_absent_from_control_reports"
+            if "neighborLink" in rec:
+                status = "observed_by_neighbor"
             values.append({"index": rec["index"], "type": rec["type"], "entity": rec["entity"],
                            "eventNs": rec["eventNs"], "evidenceArrivedNs": arrived,
                            "delayNs": formula.elapsed_ns(rec["eventNs"], arrived),
                            "duringDrain": bool(arrived is not None and arrived >= end),
-                           "status": status, "evidence": rec["samples"] if arrived is not None else {}})
+                           "status": status, "evidence": rec["samples"] if arrived is not None else {},
+                           **({"neighborLink": rec["neighborLink"]} if "neighborLink" in rec else {})})
     # JSON arrays in sealed receipts and in-memory values have the same representation.
     return sorted(json.loads(json.dumps(values)), key=lambda item: item["index"])
 
@@ -147,9 +166,11 @@ def competition_metrics(directory, summary):
     clock = summary["clock"]
     windows = event_windows(directory, cond, clock["start_ns"], clock["end_ns"], clock["drain_end_ns"])
     ttl = cond["simulation"]["control"]["observation_ttl_ns"]
+    # Receipts before peer_endpoint_v2 encoded effective link availability in endpoint_online.
+    peer_evidence = summary.get("control", {}).get("probe_semantics") == "peer_endpoint_v2"
     writes = {}
     for row in records(directory / "controller.jsonl"):
-        accept_report(windows, row, ttl)
+        accept_report(windows, row, ttl, peer_evidence=peer_evidence)
         if row["event"] == "command_sent":
             c = row["command"]
             if c["action"]["op"] != "query":
@@ -258,4 +279,19 @@ def competition_metrics(directory, summary):
         result["coverage"]["fallbackHolds"] = sum(x.get("fallbackHold", False) for x in scored)
         result["coverage"]["plansWithoutFreshEvidence"] = sum(x["evidenceStatus"] == "no_fresh_evidence" for x in scored)
         result["coverage"]["plansReadyAtOrAfterEnd"] = sum(x["planReadyNs"] >= end for x in scored)
+    if peer_evidence:
+        result["schema"] = "b03.competition.v3"
+        result["coverage"].update(
+            observableEvents=sum(x["type"] != "node_move" for x in events),
+            observedBeforeEnd=sum(x["evidenceArrivedNs"] is not None and not x["duringDrain"] for x in events),
+            observedThroughDrain=sum(x["evidenceArrivedNs"] is not None for x in events),
+            observedByNeighbor=sum(x["status"] == "observed_by_neighbor" for x in events),
+        )
+        requested = summary["demandBits"]
+        data = summary["packets"]["data"]
+        result["serviceGuarantee"].update(
+            requestedPayloadBits=requested,
+            generatedPayloadFractionOfDemand=formula.ratio(data["generated_payload_bytes"] * 8, requested),
+            onTimePayloadFractionOfDemand=formula.ratio(data["deadline_success_payload_bytes"] * 8, requested),
+        )
     return result

@@ -139,6 +139,12 @@ class PublicPorts(unittest.TestCase):
                        "simulatorPorts": sim.ports.receipt()}
             verify_ports(run, conditions, summary, controller, executed, intervals)
             self.assertTrue(all(x > 0 for x in summary["simulatorPorts"]["callbacks"].values()))
+            # Custom archives name their topology by role, including on portable replay.
+            custom_topology = run / "input/topology/edges.json"
+            custom_topology.parent.mkdir()
+            (run / "input/net-topo.json").rename(custom_topology)
+            conditions.update(sceneOrigin="custom", sourceFiles={"topology": "topology/edges.json"})
+            verify_ports(run, conditions, summary, controller, executed, intervals)
             original = intervals[0]["W_service_ns"]
             intervals[0]["W_service_ns"] += 1
             with self.assertRaisesRegex(ValueError, "differ from sealed"):

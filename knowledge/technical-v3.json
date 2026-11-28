@@ -1,0 +1,167 @@
+{
+  "schema": "b03.knowledge.v2",
+  "version": "1.2.0",
+  "entries": [
+    {
+      "id": "K044",
+      "topics": [
+        "admission",
+        "residual capacity",
+        "QoS"
+      ],
+      "content": "On the first authorized work order, retain installed paths and original payload rates. Search bounded residual paths for each writable unmet service in priority order. Validate each proposal and debit its wire reservation before testing the next service.",
+      "sources": [
+        "src/opening.py",
+        "src/packet/packet_roles.py"
+      ],
+      "applicability": "Work-order mode with the residual initial-admission setting, delivered observations and an active writable request."
+    },
+    {
+      "id": "K045",
+      "topics": [
+        "packet simulation",
+        "measurement",
+        "readback",
+        "clock"
+      ],
+      "content": "OM authorizes a work order using delivered reports. RC selects a legal tool and submits a plan. Devices apply versioned commands. OM confirms actual paths from per-hop readback. Integrate unmet service seconds (U) and priority-weighted seconds (W) over the scoring window. Record RC selection and solver wall time separately from the packet waiting interval. The scoring boundary and subsequent drain have independent packet ledgers.",
+      "sources": [
+        "src/packet/packet_roles.py",
+        "src/packet/packet_device_readback.py",
+        "src/packet/packet_measure.py"
+      ],
+      "applicability": "B03 packet work orders with the pinned resnet engine and measurements taken on the same simulation clock."
+    },
+    {
+      "id": "K046",
+      "topics": [
+        "observed_pending_admission",
+        "业务待准入"
+      ],
+      "content": "将这项业务列为待准入。交给管控前，核对它是否在本轮可写名单内。",
+      "sources": [
+        "src/packet/packet_roles.py"
+      ],
+      "applicability": "运维检查本轮已送达的业务需求，尚无该业务的已确认配置。",
+      "kind": "diagnosis",
+      "evidence": [
+        "需求报告已到达，仍在有效期内，业务已登记并处于活动状态。",
+        "控制端的已确认配置中没有该业务。"
+      ],
+      "limits": "待准入只说明有需求需要处理，尚不能说明路径或带宽可用。"
+    },
+    {
+      "id": "K047",
+      "topics": [
+        "demand_stale",
+        "业务报告过期"
+      ],
+      "content": "把这项业务标为需求待核实，等待业务源的新报告，再判断是否需要调整。",
+      "sources": [
+        "src/packet/packet_roles.py"
+      ],
+      "applicability": "控制端已有该业务的需求报告，但本轮检查时已过期。",
+      "kind": "diagnosis",
+      "evidence": [
+        "缓存中存在该业务的已送达报告。",
+        "本轮快照按已配置的有效期将该需求标为过期。"
+      ],
+      "limits": "现有证据无法确认业务已停止，也无法确认节点已经离线。"
+    },
+    {
+      "id": "K048",
+      "topics": [
+        "path_observation_incomplete",
+        "路径观测不全"
+      ],
+      "content": "标记缺少有效观测的链路，保留已确认的业务路径记录，待新探针送达后再核查。",
+      "sources": [
+        "src/packet/packet_roles.py"
+      ],
+      "applicability": "检查一条已确认的业务路径时，当前观测不足以完成核查，且本轮未优先判定为已有证据的物理故障。",
+      "kind": "diagnosis",
+      "evidence": [
+        "控制端已确认该业务的路径及所经过的链路。",
+        "至少一段链路的观测未满足当前可用条件。"
+      ],
+      "limits": "报告缺失或过期本身不能确定故障位置、丢包原因或上报节点的在线状态。"
+    },
+    {
+      "id": "K049",
+      "topics": [
+        "confirmed_load_exceeds_observed_capacity",
+        "预留超过容量"
+      ],
+      "content": "按链路列出占用已确认预留的业务，将预留线速之和与最新观测容量比较，交由运维按权限判断哪些业务需要重算。",
+      "sources": [
+        "src/packet/packet_roles.py",
+        "src/b03_formulas.py"
+      ],
+      "applicability": "运维检查已确认业务路径，链路具有可用的容量报告。",
+      "kind": "diagnosis",
+      "evidence": [
+        "链路报告已送达且可用于本轮判断。",
+        "账本中的已确认预留线速之和超过报告中的容量，两项均以 bit/s 表示。"
+      ],
+      "limits": "预留量说明配置占用了多少容量。实际吞吐、是否丢包及其原因需要另查运行证据。"
+    },
+    {
+      "id": "K050",
+      "topics": [
+        "retaining_until_cleanup_readback",
+        "清理未确认"
+      ],
+      "content": "分别记录源端停发和各设备清理的进度。缺少清理确认时保留相关预留，待相应设备回执或读回结果到达后核对。",
+      "sources": [
+        "src/packet/packet_device.py"
+      ],
+      "applicability": "执行器正在释放已有配置，源端停发已获确认。",
+      "kind": "diagnosis",
+      "evidence": [
+        "已收到停发确认，或设备查询已核实停发。",
+        "至少一个待清理设备的对应配置尚未确认清除。"
+      ],
+      "limits": "控制端暂时无法区分命令未到达、回执未到达和设备不可达。此状态属于执行阶段。"
+    },
+    {
+      "id": "CASE001",
+      "topics": [
+        "path_observation_incomplete",
+        "路径观测不全",
+        "管理探针缺报"
+      ],
+      "content": "遇到管理探针持续缺报时，可记录最后一次有效观测及缺报涉及的链路。历史运行提供过管理报文受传输路径影响的例子，当前原因仍需当前证据支持。",
+      "sources": [
+        "knowledge/cases/CASE001.json",
+        "src/packet/packet_roles.py"
+      ],
+      "applicability": "业务或管理路径上的链路持续缺少可用探针。",
+      "kind": "case",
+      "evidence": [
+        "控制端缺少同一上报端的最新有效观测。",
+        "本轮无法取得所需链路的完整观测。"
+      ],
+      "limits": "同样的现象可能有不同原因。上报端的真实发送次数和报文丢弃位置只能在有独立记录时核实。"
+    },
+    {
+      "id": "CASE002",
+      "topics": [
+        "retaining_until_cleanup_readback",
+        "清理未确认",
+        "释放工单"
+      ],
+      "content": "把同一释放操作中的源端停发和设备清理分开登记，并留意等待期间是否已有其他业务报告送达。历史工单中曾出现清理待确认期间另一项需求尚未得到处理。",
+      "sources": [
+        "knowledge/cases/CASE002.json",
+        "src/packet/packet_device.py"
+      ],
+      "applicability": "已有停发确认，释放工单仍在等待个别设备清理。",
+      "kind": "case",
+      "evidence": [
+        "源端的停发已确认。",
+        "仍有对应设备缺少清理确认，工单处于等待状态。"
+      ],
+      "limits": "历史案例只能提示检查工单进度。判断本轮是否阻塞其他业务，需要比对该业务报告送达与后续处理记录。"
+    }
+  ]
+}

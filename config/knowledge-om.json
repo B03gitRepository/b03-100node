@@ -1,0 +1,35 @@
+{
+  "extends": "knowledge-v3.json",
+  "knowledge": {
+    "bindings": {
+      "om": {
+        "from": "diagnosis",
+        "topics": {
+          "observed_pending_admission": [
+            "K046"
+          ],
+          "demand_stale": [
+            "K047"
+          ],
+          "path_observation_incomplete": [
+            "K048",
+            "CASE001"
+          ],
+          "confirmed_load_exceeds_observed_capacity": [
+            "K049"
+          ],
+          "retaining_until_cleanup_readback": [
+            "K050",
+            "CASE002"
+          ]
+        }
+      },
+      "rules": {
+        "from": "om"
+      },
+      "model": {
+        "from": "om"
+      }
+    }
+  }
+}

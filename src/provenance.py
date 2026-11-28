@@ -23,6 +23,7 @@ from scene import sha256
 
 SCHEMA = "b03.provenance.v2"
 COMPONENT_KINDS = ("model", "rules", "knowledge", "simulator")
+CHECKOUT_PACKAGES = ("src", "knowledge")
 IGNORE_DIRS = {"__pycache__", ".git", ".hg", ".svn", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
 
 
@@ -397,7 +398,7 @@ def provider_records(root, components, policy, distributions, requested):
             origin = module_file(module)
             top = module.split(".")[0]
             info["entrySha256"] = sha256(origin)
-            if origin.is_relative_to(root / "src") and not config.get("distribution"):
+            if not config.get("distribution") and any(origin.is_relative_to(root / name) for name in CHECKOUT_PACKAGES):
                 info["source"] = {"checkout": origin.relative_to(root).as_posix()}
             else:
                 owner = distributions.owner(module, origin, config.get("distribution"))
@@ -412,6 +413,11 @@ def provider_records(root, components, policy, distributions, requested):
     return providers
 
 
+def checkout_python_files(root):
+    for name in CHECKOUT_PACKAGES:
+        yield from (root / name).rglob("*.py")
+
+
 def checkout_files(root, native):
     paths = [root / "run.py", root / "config/profile.json", root / "config/simulator.lock.json",
              root / "requirements.txt"]
@@ -424,7 +430,7 @@ def checkout_files(root, native):
     if (root / "src/b03_formulas.py").is_file():
         paths.append(root / "knowledge/formulas-v1.json")
     # A partner factory may delegate to any published helper, including the examples.
-    paths.extend((root / "src").rglob("*.py"))
+    paths.extend(checkout_python_files(root))
     return {p.relative_to(root).as_posix(): sha256(p) for p in sorted(paths)}
 
 
@@ -495,9 +501,14 @@ def capture_provenance(root, components, *, checkpoint=None, tokenizer=None, pol
     providers = provider_records(root, components, policy, packages, requested)
     assets = model_assets(root, native, policy_identity, checkpoint, tokenizer) if policy == "model" else {}
     knowledge = components.knowledge_path.read_bytes()
+    files = checkout_files(root, native)
+    # Bind the actual preset chain used for this run, including inherited knowledge presets.
+    for path in components.input_paths:
+        if path.is_relative_to(root / "knowledge" / "presets"):
+            files[path.relative_to(root).as_posix()] = sha256(path)
     evidence = {
         "schema": SCHEMA, "policy": policy, "nativeFrozen": native,
-        "gitCommit": revision(root), "checkoutFiles": checkout_files(root, native),
+        "gitCommit": revision(root), "checkoutFiles": files,
         "python": {"implementation": platform.python_implementation(), "version": platform.python_version(),
                    "system": platform.system(), "machine": platform.machine()},
         "runtimeRequirements": runtime_roots, "activeComponents": active_registration(components, policy),

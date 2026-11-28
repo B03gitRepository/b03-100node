@@ -18,9 +18,12 @@ class ObservationCache:
     """按(link_id,reporter_node_id)保存最新接受的探针，两个端点独立计序号。"""
 
     def __init__(self, link_endpoints: dict[str, tuple[str, str]],
-                 max_staleness_ns: int = OBSERVATION_TTL_NS):
+                 max_staleness_ns: int = OBSERVATION_TTL_NS, *, queue_limit_packets: int | None = None):
         require_int(max_staleness_ns, "max_staleness_ns", 1)
         self.max_staleness_ns = max_staleness_ns
+        if queue_limit_packets is not None:
+            require_int(queue_limit_packets, "queue_limit_packets", 1)
+        self.queue_limit_packets = queue_limit_packets
         self.link_endpoints = dict(link_endpoints)
         for lid, pair in self.link_endpoints.items():
             if not isinstance(lid, str) or not lid or len(pair) != 2 or pair[0] == pair[1]:
@@ -65,9 +68,25 @@ class ObservationCache:
                 result["reason"] = "older_sample_time"
             else:
                 # 不持有调用者的可变字典，避免后续本地更新悄悄改写历史报告。
-                self._reports[(lid, nid)] = {"probe": deepcopy(probe), "received_at_ns": received_at_ns}
+                pressure = self._queue_pressure(probe, previous)
+                self._reports[(lid, nid)] = {"probe": deepcopy(probe), "received_at_ns": received_at_ns,
+                                              "queue_pressure": pressure}
                 result.update(accepted=True, reason="accepted")
         return result
+
+    def _queue_pressure(self, probe, previous):
+        # 按同一端口收到的样本判断。连续两次达到包数上限的 75% 才触发，降到 50% 后清除。
+        limit = self.queue_limit_packets
+        if limit is None or previous is None:
+            return False
+        depth = probe["link"]["queue_packets"]
+        elapsed = probe["observed_at_ns"] - previous["probe"]["observed_at_ns"]
+        if elapsed > self.max_staleness_ns or depth * 2 <= limit:
+            return False
+        if previous["queue_pressure"]:
+            return True
+        return (elapsed > 0 and depth * 4 >= limit * 3
+                and previous["probe"]["link"]["queue_packets"] * 4 >= limit * 3)
 
     def snapshot(self, now_ns: int) -> dict:
         """重新检查有效期，生成策略可读的保守链路视图。
@@ -103,10 +122,11 @@ class ObservationCache:
                            ber=max(q1["ber"], q2["ber"]),
                            queue_packets=max(q1["queue_packets"], q2["queue_packets"]),
                            observed_at_ns=min(p1["observed_at_ns"], p2["observed_at_ns"]))
-                if not (p1["node_online"] and p2["node_online"] and q1["endpoint_online"] and q2["endpoint_online"]):
-                    row["reason"] = "endpoint_offline"
-                elif not (q1["admin_up"] and q2["admin_up"]):
+                row["queue_pressure"] = any(r["queue_pressure"] for r in present)
+                if not (q1["admin_up"] and q2["admin_up"]):
                     row["reason"] = "link_down"
+                elif not (p1["node_online"] and p2["node_online"] and q1["endpoint_online"] and q2["endpoint_online"]):
+                    row["reason"] = "endpoint_offline"
                 else:
                     row.update(usable=True, reason="fresh_both_endpoints_up")
             links[lid] = row

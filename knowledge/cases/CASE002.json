@@ -1,0 +1,20 @@
+{
+  "id": "CASE002",
+  "title": "源端停发后仍待设备清理",
+  "publishedEdition": "1.2.0",
+  "observedAtController": "源端已经确认停发，另一个设备的清理确认尚未送达。",
+  "retrospectiveEvidence": {
+    "finding": "等待清理期间，另一项需求变化已经送达，检查窗口内没有随后的新评估。",
+    "sourceStopConfirmed": true,
+    "cleanupConfirmed": false,
+    "anotherDemandDelivered": true
+  },
+  "example": "合成业务 flow-a 停发后，单独记录未确认设备。对随后送达的 flow-b 需求按当轮权限和预留重新核查。",
+  "limits": "缺少清理回执只能确定清理尚未确认。核对其他业务的处理进度需要关联送达记录和后续工单。",
+  "source": {
+    "recordId": "CASE002",
+    "evidenceKind": "work-order-and-packet-trace-extract",
+    "extractSha256": "4b2a09832319b7128f7ea1a7c557ea54b4cebfa9afa89bdbd661175e2351fdbd",
+    "recordSha256": "32669b417f6488d8d42c8e99069a9322c7aff1a8e21b82e5bc37f016745012e8"
+  }
+}

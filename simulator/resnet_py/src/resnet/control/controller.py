@@ -36,7 +36,8 @@ class NetworkController:
         self.stop_ns = self.end_ns + round(sim.config.get('drain_s', 0) * 1e9)
         self.managed = set(self.options['managed_service_ids'])
         self.endpoints = {l.link_id: (l.src_node_id, l.dst_node_id) for l in sim.scenario.links}
-        self.link_reports = ObservationCache(self.endpoints, self.options['observation_ttl_ns'])
+        self.link_reports = ObservationCache(self.endpoints, self.options['observation_ttl_ns'],
+                                             queue_limit_packets=sim.config['queue_packets'])
         self.service_reports = ServiceObservationCache(self.node_ids, self.options['observation_ttl_ns'])
         # 官方场景显式采用官方配置级 QoS 合成及拒绝规则。
         # 参数绑定只作用于内置策略；外部智能体仍使用原有 DecisionPolicy 接口。
@@ -151,11 +152,12 @@ class NetworkController:
             snapshot = self.sim.links[lid].snapshot()
             params = snapshot['parameters']
             self.probe_sequences[nid, lid] += 1
+            peer = pair[1] if pair[0] == nid else pair[0]
             probe = {'kind': 'probe', 'node_id': nid, 'seq': self.probe_sequences[nid, lid],
                      'observed_at_ns': self.now(), 'node_online': True,
                      'version': self.node_executors[nid].version,
-                     'link': {'link_id': lid, 'peer_node_id': pair[1] if pair[0] == nid else pair[0],
-                              'admin_up': snapshot['admin_up'], 'endpoint_online': snapshot['effective_up'],
+                     'link': {'link_id': lid, 'peer_node_id': peer,
+                              'admin_up': snapshot['admin_up'], 'endpoint_online': snapshot['endpoint_online'][peer],
                               'capacity_bps': int(params['capacity_bps']),
                               'delay_ns': round(params['delay_ms'] * 1e6),
                               'jitter_ns': round(params['jitter_ms'] * 1e6),
@@ -211,7 +213,7 @@ class NetworkController:
         self._schedule(self.now() + self.options['service_report_interval_ns'], lambda: self._service_tick(nid))
 
     def _control_tick(self):
-        # 现实计算耗时单独记录；模拟计算耗时当前设为 0。
+        # 统计本次调用的墙钟开销，是否折算为仿真时延由当前控制循环决定。
         start = perf_counter_ns()
         if self.sim.state.node_online[self.controller_id]:
             self.loop.tick(self.now())
@@ -239,6 +241,8 @@ class NetworkController:
             'observation_ttl_ns': self.options['observation_ttl_ns'],
             'command_validity_ns': self.options['command_validity_ns'],
             'control_end_ns': self.stop_ns,
-            'decision_compute_mode': 'zero_simulated_compute_delay_python_deterministic_baseline',
+            'decision_compute_mode': getattr(self.loop, 'decision_compute_mode',
+                                             'zero_simulated_compute_delay_python_deterministic_baseline'),
+            'probe_semantics': 'peer_endpoint_v2',
             'path_change_mode': 'stop_confirm_cleanup_then_redeploy',
         })

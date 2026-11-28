@@ -212,6 +212,9 @@ class DecisionPolicy:
         if not legal:
             raise ValueError("The model has no legal tool under the current authorization")
         observation = policy_observation(state, snapshot, ledger, diagnosis, config, legal)
+        if "networkBaseline" in diagnosis and self.identity.get("networkFoundationHook"):
+            from knowledge.agent_facts import model_network_reference
+            observation["networkReference"] = model_network_reference(diagnosis["networkBaseline"], state, diagnosis)
         if knowledge_context is not None:
             observation["knowledgeContext"] = deepcopy(knowledge_context)
         current_version = getattr(self.actor, "version", None)

@@ -1,4 +1,4 @@
-"""Run and inspect one official B03 scenario with the pinned packet simulator."""
+"""Run and inspect official or custom scenarios with the pinned packet simulator."""
 from __future__ import annotations
 import argparse
 from contextlib import ExitStack
@@ -10,7 +10,67 @@ from pathlib import Path
 import sys
 import time
 
-from scene import DEPENDENCY, PROFILE, ROOT, has_bundled_data, prepare, sha256 as checksum, simulator_root, verify_engine, write_json as json_file
+from scenario_manifest import parse_custom_manifest, read_custom_manifest, resolve_manifest_reference, resolve_preset, selected_channel
+from scene import PROFILE, ROOT, has_bundled_data, prepare, sha256, simulator_root, verify_engine, write_json as json_file
+
+
+def _network_source(args, parser):
+    """Opt into a custom pack; otherwise preserve the official profile and B03_DATA precedence."""
+    from knowledge.network import resolve_external, resolve_network
+    if args.script is not None and (args.network is not None or args.scenario is not None):
+        parser.error("--script selects an official script and cannot be combined with --network or --scenario")
+    if args.network is not None:
+        network = resolve_network(ROOT, args.network)
+        args.scenario = network["manifest"]
+        return network
+    if args.scenario is not None:
+        args.scenario = resolve_manifest_reference(ROOT, args.scenario)
+    return resolve_external(ROOT, args.scenario)
+
+
+def _select_scene(args, parser, engine):
+    """Resolve the input source. B03_DATA supplies the default for official runs."""
+    if args.scenario is not None:
+        return args.scenario.resolve(strict=True).parent
+    if args.script is None:
+        args.script = PROFILE["script"]
+    if f"scripts/script-{args.script}.json" not in PROFILE["pins"]:
+        parser.error("Choose a registered official script from 01 through 10")
+    if args.data is None and os.environ.get("B03_DATA"):
+        args.data = Path(os.environ["B03_DATA"])
+    if args.data is None and not has_bundled_data(engine, args.script):
+        parser.error("Supply --data PATH or set B03_DATA to the official scenario folder or dataset archive.")
+    return args.data.resolve() if args.data and args.data.is_dir() else None
+
+
+def _run_options(args, parser, scenario, out):
+    """Apply command-line overrides to the defaults from the archived scenario."""
+    source_info = {"scene": scenario.scenario_id, "script": args.script, "sourceHashes": scenario.source_hashes}
+    window, selection = PROFILE, PROFILE["exampleServices"]
+    if args.scenario is not None:
+        archived = out / "scenario-manifest.json"
+        manifest = read_custom_manifest(archived)
+        window, selection = manifest["window"], manifest["services"]
+        source_info.update(scene="custom:" + scenario.scenario_id, sceneOrigin="custom",
+                           sceneContract=manifest["schema"], manifestVersion=manifest["version"],
+                           manifestSha256=sha256(archived), sourceFiles=scenario.raw_documents["scenario-config.json"]["files"])
+        override = getattr(args, "channel_selection", None)
+        if override is not None:
+            source_info["channelSelection"] = override
+        if selected_channel(manifest, override) is not None:
+            model_file = out / "channel-model.json"
+            profile = json.loads(model_file.read_bytes())
+            source_info["sourceHashes"] = {name: sha256(out / "input" / name) for name in scenario.source_hashes}
+            source_info["channelModel"] = {"id": profile["id"], "version": profile["version"], "model": profile["model"],
+                                           "profileSha256": sha256(model_file), "effectiveHashes": scenario.source_hashes}
+    args.start = window["start"] if args.start is None else args.start
+    args.end = window["end"] if args.end is None else args.end
+    args.drain = window["drain"] if args.drain is None else args.drain
+    if args.drain < 0 or not 0 <= args.start < args.end <= scenario.duration_s:
+        parser.error("Require 0 <= start < end <= the selected scenario horizon, and drain >= 0")
+    if args.services is not None:
+        selection = "all" if args.services == "all" else args.services.split(",")
+    return source_info, selection
 
 
 def main(argv=None, *, on_policy_ready=None):
@@ -18,8 +78,16 @@ def main(argv=None, *, on_policy_ready=None):
     actions = parser.add_subparsers(dest="command", required=True)
     run = actions.add_parser("run", help="Run the native packet clock and B03 controls")
     run.add_argument("--simulator", help="Read-only resnet_py release (default: B03_SIMULATOR or simulator/resnet_py)")
-    run.add_argument("--data", type=Path, default=os.environ.get("B03_DATA") or None, help="Official dataset archive, extracted root or scenario folder")
-    run.add_argument("--script", default=PROFILE["script"])
+    source = run.add_mutually_exclusive_group()
+    source.add_argument("--data", type=Path, help="Official dataset archive, extracted root or scenario folder")
+    source.add_argument("--scenario", type=Path, metavar="MANIFEST", help="Custom scenario manifest")
+    source.add_argument("--network", metavar="ID", help="Select a named synthetic network from knowledge/scenarios")
+    run.add_argument("--foundation", action="store_true",
+                     help="Archive and share the static opening map for an official run (included for custom scenes)")
+    channel = run.add_mutually_exclusive_group()
+    channel.add_argument("--channel-profile", metavar="ID", help="Override a custom manifest's channel edition")
+    channel.add_argument("--no-channel", action="store_true", help="Use a custom scene's nominal link settings")
+    run.add_argument("--script", help=f"Official script number (default: {PROFILE['script']})")
     run.add_argument("--mode", choices=["package", "single", "workorder"], default="workorder")
     run.add_argument("--initial-admission", choices=["residual","audit","original"], default="residual",
                      help="At the first admitted work order, check authorized omissions on residual links")
@@ -28,16 +96,16 @@ def main(argv=None, *, on_policy_ready=None):
     run.add_argument("--checkpoint",type=Path,default=os.environ.get("B03_CHECKPOINT"))
     run.add_argument("--tokenizer",type=Path,default=os.environ.get("B03_TOKENIZER"))
     run.add_argument("--device",choices=["cpu","cuda"],default="cuda")
-    run.add_argument("--services", default=",".join(PROFILE["exampleServices"]), help="Comma-separated active workload, or all")
+    run.add_argument("--services", help="Comma-separated active workload, or all; defaults to the selected scenario")
     run.add_argument("--writable-services", help="Subset that can receive writes")
     run.add_argument("--protected-services", default="")
     run.add_argument("--service-end", action="append", default=[], metavar="ID=SECONDS",
                      help="Schedule a project test demand end at an absolute second; repeat for separate services")
-    run.add_argument("--start", type=int, default=PROFILE["start"])
-    run.add_argument("--end", type=int, default=PROFILE["end"])
-    run.add_argument("--drain", type=int, default=PROFILE["drain"])
+    run.add_argument("--start", type=int)
+    run.add_argument("--end", type=int)
+    run.add_argument("--drain", type=int)
     run.add_argument("--defer-unreachable-cleanup", action="store_true",
-                     help="Keep unresolved terminal cleanup reservations while disjoint work orders proceed")
+                     help="Park unresolved device work under the v2 recovery contract in workorder mode")
     run.add_argument("--drop-install-ack", action="store_true", help="Test one lost native install receipt")
     run.add_argument("--output", type=Path, required=True)
     check = actions.add_parser("verify", help="Validate causal evidence, native device writes, QoS, and packet accounts")
@@ -52,6 +120,7 @@ def main(argv=None, *, on_policy_ready=None):
     selector = lookup.add_mutually_exclusive_group(required=True)
     selector.add_argument("--id", dest="identifier")
     selector.add_argument("--topic")
+    selector.add_argument("--channel-profile", metavar="ID", help="Read a channel edition and its configured capacity limits")
     sample = actions.add_parser("examples", help="Export actual model, solver and knowledge examples from a sealed run")
     sample.add_argument("directory", type=Path)
     sample.add_argument("--components", type=Path)
@@ -69,7 +138,7 @@ def main(argv=None, *, on_policy_ready=None):
         parser.error("Run without -O so all invariant checks execute")
     packet = ROOT / "src/packet"
     runtime = ROOT / "src/rules"
-    sys.path[:0] = [str(runtime / "vendor/src"), str(runtime), str(packet)]
+    sys.path[:0] = [str(runtime / "vendor/src"), str(runtime), str(packet), str(ROOT)]
     from component_config import load_components
     if args.command in ("verify", "examples"):
         manifest = load_components(args.components) if args.components else None
@@ -83,6 +152,15 @@ def main(argv=None, *, on_policy_ready=None):
         print(json.dumps({k: result[k] for k in ("scene", "nodes", "links", "mode", "acceptedPathChecks", "verifiedDeviceQueryCount", "actualModelCalls", "toolChoices", "business", "packets", "verification")}, ensure_ascii=False))
         return
     if args.command == "knowledge":
+        if args.channel_profile is not None:
+            if args.formulas or args.components:
+                lookup.error("--channel-profile reads the channel catalog directly")
+            from knowledge.channels.model import read_edition
+            _, profile, ceilings = read_edition(ROOT / "knowledge/channels", args.channel_profile)
+            if args.edition is not None and args.edition != profile["version"]:
+                lookup.error("Requested edition differs from the selected channel profile version")
+            print(json.dumps({"profile": profile, "capacityCeilingsBps": ceilings}, ensure_ascii=False, indent=2))
+            return
         if args.formulas:
             import b03_formulas as formula
             if args.components:
@@ -107,22 +185,35 @@ def main(argv=None, *, on_policy_ready=None):
         return
     if args.defer_unreachable_cleanup and args.mode != "workorder":
         run.error("--defer-unreachable-cleanup is a work-order device recovery option")
+    network = _network_source(args, run)
+    args.channel_selection = None
+    if args.no_channel or args.channel_profile is not None:
+        if args.scenario is None:
+            run.error("--channel-profile and --no-channel require --scenario or --network")
+        args.channel_selection = {"source": "cli", "profile": args.channel_profile}
+    preset = manifest_pin = preset_pin = None
+    if args.scenario is not None:
+        raw_manifest = args.scenario.read_bytes()
+        manifest_pin = hashlib.sha256(raw_manifest).hexdigest()
+        manifest = parse_custom_manifest(raw_manifest)
+        selected_channel(manifest, args.channel_selection)
+        preset = manifest.get("knowledgePreset")
+        if preset:
+            args.components = resolve_preset(ROOT, preset, args.components)
+            preset_pin = sha256(args.components)
     components = load_components(args.components)
     if args.policy not in (*components.symbols, "model", "combined"):
         run.error("The requested policy is absent from the configured action catalog")
     dependency = simulator_root(args.simulator)
-    if args.data is None and not has_bundled_data(dependency, args.script):
-        run.error("Supply --data PATH or set B03_DATA to the official scenario folder or dataset archive.")
+    raw_root = _select_scene(args, run, dependency)
     out = args.output.resolve()
-    raw_root = args.data.resolve() if args.data and args.data.is_dir() else None
     if out == dependency or dependency in out.parents or (raw_root and (out == raw_root or raw_root in out.parents)):
         run.error("Select an output directory outside the source inputs")
-    if args.drain < 0 or not 0 <= args.start < args.end <= PROFILE["horizonSeconds"]:
-        run.error("Require 0 <= start < end <= the scenario horizon, and drain >= 0")
-    if f"scripts/script-{args.script}.json" not in PROFILE["pins"]:
-        run.error("Choose a registered official script from 01 through 10")
     from simulator_component import LOCK_MEMBER, runtime_identity, select_engine, simulation_type
     components.activate(args.policy if args.mode == "workorder" else args.mode)
+    if args.mode == "workorder":
+        from knowledge.work_order import BINDING_CONTRACT, validate_binding_edition
+        validate_binding_edition(components)
     lock_blob, lock = select_engine(components)
     fingerprint = verify_engine(dependency, lock)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -138,7 +229,18 @@ def main(argv=None, *, on_policy_ready=None):
     from b03 import solver
     from packet_measure import request_row
     engine_type = simulation_type(components)
-    scenario, config, config_hash, input_dir = prepare(dependency, args.data, args.script, out)
+    scenario, config, config_hash, _ = prepare(
+        dependency, args.data, args.script, out, manifest_path=args.scenario, resources=network["resources"],
+        channel_selection=args.channel_selection, archive_bundled_config=args.foundation)
+    source_info, selection = _run_options(args, run, scenario, out)
+    foundation = None
+    source_info["foundationEnabled"] = args.foundation or args.scenario is not None
+    if source_info["foundationEnabled"]:
+        from scene import archive_network_foundation
+        foundation, source_info["networkFoundation"] = archive_network_foundation(
+            out, network, config, source_info, manifest=args.scenario)
+    if manifest_pin is not None and manifest_pin != source_info["manifestSha256"]:
+        raise ValueError("The scenario manifest changed while selecting components")
 
     if args.mode != "workorder" and args.policy != "I":
         run.error("--policy is available on the joint OM/RC work-order path")
@@ -152,7 +254,7 @@ def main(argv=None, *, on_policy_ready=None):
         if on_policy_ready is not None:
             on_policy_ready(chooser)
     specs = {x.service_id: x for x in scenario.services + scenario.added_services}
-    ids = sorted(specs) if args.services == "all" else sorted(set(args.services.split(",")))
+    ids = sorted(specs) if selection == "all" else sorted(set(selection))
     if not ids or not set(ids) <= specs.keys():
         run.error("Unknown or empty original service selection")
     activity = {}
@@ -163,7 +265,7 @@ def main(argv=None, *, on_policy_ready=None):
         activity = {"schema": "b03.demand-ends.v1", "origin": "experiment", "endSeconds": cutoffs}
         json_file(out / "input/b03-demand-ends.json", activity)
     writable = set(ids) if args.writable_services is None else set(filter(None, args.writable_services.split(",")))
-    discover_writes = args.services == "all" and args.writable_services is None
+    discover_writes = selection == "all" and args.writable_services is None
     protected = set(filter(None, args.protected_services.split(",")))
     if not writable <= set(ids) or not protected <= set(ids):
         run.error("Write scope and protected IDs must be part of the original selected workload")
@@ -172,15 +274,19 @@ def main(argv=None, *, on_policy_ready=None):
     config.update(start_s=args.start, end_s=args.end, drain_s=args.drain, service_ids=ids)
     config["control"] = {**config["control"], "managed_service_ids": ids}
     pyenv = {pkg: importlib.metadata.version(pkg) for pkg in ["simpy"] + (["a2a-sdk"] if args.mode == "workorder" else [])}
-    identity = {"scene": scenario.scenario_id, "script": args.script, "nodeCount": len(scenario.nodes), "linkCount": len(scenario.links), "initialServiceCount": len(scenario.services), "eventCount": len(scenario.events), "case":"packet_control", "sourceHashes": scenario.source_hashes,
+    definitions = {sid: request_row(specs[sid]) for sid in ids}
+    definition_key = "serviceDefinitions" if args.scenario is not None else "officialDefinitions"
+    identity = {**source_info, "nodeCount": len(scenario.nodes), "linkCount": len(scenario.links), "initialServiceCount": len(scenario.services), "eventCount": len(scenario.events), "case":"packet_control",
                 "components": components.identity, "rcPolicy": chooser.identity if chooser else None, "releaseManifestSha256": fingerprint, "originalConfigSha256": config_hash,
                 "simulatorRuntime": runtime_identity(components.simulator, lock, lock_blob),
-                "simulation": config, "services": ids, "officialDefinitions": {sid: request_row(specs[sid]) for sid in ids},
+                "simulation": config, "services": ids, definition_key: definitions,
                 "authority": {"discovery":"all_delivered_registered" if discover_writes else "explicit_roster", "allowedServiceIds": sorted(writable), "protectedServiceIds":sorted(protected), "effectiveWriteIds":sorted(writable - protected), "healthyMigration": False, "preemption": False,
                               "rateScale": config["rate_scale"], "scope": "B03 work orders; package/single use native stock review authority"},
                 "coldStart": args.start != 0, "match": "same input bytes, reporting, start/end/drain, clocks, eligible IDs, full demand, physical queues and seed"}
     if args.mode == "workorder":
-        identity["deviceRecovery"] = {"contractVersion": "b03.deferred-cleanup.v1",
+        identity["knowledgeBindingContract"] = BINDING_CONTRACT
+        identity["deviceRecovery"] = {"contractVersion": ("b03.deferred-cleanup.v2" if args.defer_unreachable_cleanup
+                                                          else "b03.deferred-cleanup.v1"),
                                       "deferUnreachableCleanup": args.defer_unreachable_cleanup}
     if activity:
         identity["activityOverlay"] = activity
@@ -190,6 +296,12 @@ def main(argv=None, *, on_policy_ready=None):
                                policy=args.policy if args.mode == "workorder" else args.mode,
                                policy_identity=chooser.identity if chooser else None)
     implementation = source_identity()
+    if preset:
+        from integrity import preset_binding
+        binding = preset_binding(preset, components.identity, implementation)
+        if binding["sha256"] != preset_pin:
+            raise ValueError("The knowledge preset changed while preparing the run")
+        identity["knowledgePreset"] = binding
     from integrity import contract_for_mode
     import b03_formulas as formula
     identity["formulaBinding"] = formula.receipt_binding(config, implementation)
@@ -233,7 +345,9 @@ def main(argv=None, *, on_policy_ready=None):
         if args.mode == "workorder":
             from packet_roles import PacketRoles
             from packet_device import install
-            roles = PacketRoles(None if discover_writes else writable, emit, chooser=chooser, protected_ids=protected, control_headroom_fraction=config["control"]["control_headroom_fraction"])
+            roles = PacketRoles(None if discover_writes else writable, emit, chooser=chooser, protected_ids=protected,
+                                control_headroom_fraction=config["control"]["control_headroom_fraction"],
+                                network_foundation=foundation)
             stack.callback(roles.close)
             workloop = install(sim, roles, emit, defer_unreachable_cleanup=args.defer_unreachable_cleanup)
         started = time.perf_counter()
@@ -248,7 +362,7 @@ def main(argv=None, *, on_policy_ready=None):
         summary = {"mode":args.mode,"seed":config["seed"],"business":evaluation,"demandBits":requested,
                   "endBoundary":boundary["conservation"],"afterDrain":drained["conservation"],
                   "packets":drained["totals"],"services":{i:drained["services"][i] for i in ids},
-                  "links":drained["links"],"sourceDefinitions":identity["officialDefinitions"],
+                  "links":drained["links"],"sourceDefinitions":definitions,
                   "fault":sim.dropped_ack,"clock":{"start_ns":sim.start_ns,"end_ns":sim.end_ns,"drain_end_ns":sim.stop_ns},
                   "control":drained["control"],
                   "b03LoopStatus":workloop.status() if args.mode == "workorder" and hasattr(workloop,"status") else None,

@@ -1,0 +1,16 @@
+{
+  "schema": "b03.channel-model.v1",
+  "id": "survey-noise-v1",
+  "version": "1.0.0",
+  "model": "noise-cap.v1",
+  "linkTypes": {
+    "radio": {
+      "signalDbm": -82,
+      "noiseDbm": -82,
+      "spectrumHz": 500000,
+      "efficiency": 0.8,
+      "extraDelayMs": 5,
+      "extraLossProbability": 0.01
+    }
+  }
+}
