@@ -1,4 +1,4 @@
-"""Seal packet traces, audit their archived identities, or check an installed source environment."""
+"""对分组工单轨迹生成封存校验清单、核验归档完整性，以及对照本地源码环境。"""
 from __future__ import annotations
 
 import hashlib
@@ -15,8 +15,8 @@ from scene import DEPENDENCY, PROFILE, ROOT, sha256, simulator_root, verify_engi
 
 
 def source_identity():
-    """Preserve the full historical checkout inventory for earlier tools and recovery."""
-    # Scenario inputs have per-run evidence. Historical case indexes are for offline review.
+    """保留完整的历史源码清单结构，确保旧工具与归档复核兼容。"""
+    # 场景输入另有逐次运行证据；历史用例索引仅用于离线复查。
     knowledge = ROOT / "knowledge"
     shared_json = [p for p in knowledge.rglob("*.json")
                    if p.relative_to(knowledge).parts[0] not in {"scenarios", "cases"}]
@@ -264,7 +264,7 @@ def check_recorded(conditions):
 
 
 def legacy_source(conditions, components, checkpoint, tokenizer):
-    """A v1 receipt can establish only the source and provider files that it originally recorded."""
+    """v1 旧版回执仅能核对当时原始记录下来的源码与提供方文件。"""
     differences = changed(conditions["implementationSha256"], source_identity(), "checkoutFiles")
     recorded = conditions.get("components")
     if recorded is not None:

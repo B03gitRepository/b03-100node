@@ -1,7 +1,7 @@
-"""Two Agent2Agent 1.0 JSON-RPC agents for the B03 packet work order.
+"""面向 B03 分组工单的双角色 A2A 1.0 JSON-RPC 通信层（OM 与 RC）。
 
-The role payload is a raw JSON Part. Protobuf Value would coerce integer
-nanoseconds to doubles. Each role has its own official SDK task store.
+角色载荷直接以原始 JSON Part 传递，避免 Protobuf Value 将整数纳秒强转为浮点导致精度丢失；
+两个角色各自维护官方 SDK 的独立 TaskStore。
 """
 from __future__ import annotations
 
@@ -85,8 +85,8 @@ def _app(role, url, handle):
             raise UnsupportedOperationError(message="Packet role requests use blocking SendMessage")
 
     class PacketHandler(DefaultRequestHandler):
-        # Adapt the T079 asynchronous send binding to this run's packet capability.
-        # The role TaskStores and immutable message bindings have process lifetime.
+        # 将 T079 异步发送绑定接口适配到当前运行的分组通信能力。
+        # 角色 TaskStore 与不可变消息绑定在进程生命周期内常驻有效。
         def __init__(self, **kwargs):
             super().__init__(**kwargs)
             self.bindings = {}
@@ -133,7 +133,7 @@ def _app(role, url, handle):
 
 
 class PacketA2A:
-    """Own two local listeners, or connect to already configured role endpoints."""
+    """管理两个本地 A2A HTTP 服务端口，或直接连接到外部已启动的角色服务端点。"""
 
     def __init__(self, handle, urls=None, *, timeout=None):
         import httpx

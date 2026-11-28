@@ -1,4 +1,4 @@
-"""Small clock fixtures without competition data or a model checkpoint."""
+"""脱离官方数据集和模型权重的轻量化赛题五指标时钟单测。"""
 import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -58,7 +58,7 @@ class CompetitionMetricsTests(unittest.TestCase):
         accept_report(windows, row, 10, peer_evidence=True)
         self.assertIsNone(rec["evidenceArrivedNs"])
         row["probe"]["link"]["admin_up"] = True
-        accept_report(windows, row, 10)  # Previous editions only scored direct evidence.
+        accept_report(windows, row, 10)  # 早期版本仅对直接送达证据计分。
         accept_report(windows, {**row, "time_ns": 24}, 10, peer_evidence=True)
         self.assertIsNone(rec["evidenceArrivedNs"])
         accept_report(windows, row, 10, peer_evidence=True)

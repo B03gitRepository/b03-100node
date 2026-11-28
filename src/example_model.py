@@ -1,4 +1,4 @@
-"""A separately registered adapter for a controlled comparison using the pinned weights."""
+"""用于受控对照实验的独立模型适配器示例，直接复用锁定的参考权重。"""
 
 from frozen_policy import FrozenActor
 

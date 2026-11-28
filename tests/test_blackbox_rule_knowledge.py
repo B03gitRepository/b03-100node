@@ -1,4 +1,4 @@
-"""Synthetic packet work orders for the ranked knowledge and rule patch contracts."""
+"""面向排序知识检索与纯数据规则补丁契约的合成工单回归测试。"""
 from copy import deepcopy
 import json
 from pathlib import Path

@@ -1,4 +1,4 @@
-"""Read actual model and rule input/output pairs from a sealed work-order trace."""
+"""从封存的工单轨迹中导出真实的模型、规则与知识组件输入输出样例。"""
 import json
 
 from integrity import check_archive

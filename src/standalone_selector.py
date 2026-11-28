@@ -1,4 +1,4 @@
-"""A dependency-free frozen tool selector. Replace this file with your own adapter."""
+"""零外部依赖的冻结工具选择器最小示例；模型组可直接替换此文件接入自有适配器。"""
 
 
 class Selector:

@@ -1,4 +1,4 @@
-"""Scope a stop to the source epoch that can still send into a disconnected destination."""
+"""验证目的节点断联时，停源授权精确限定于仍在向失联终点发包的源端代际。"""
 import unittest
 import sys
 from pathlib import Path
@@ -88,7 +88,7 @@ class DestinationStopTests(unittest.TestCase):
         batches = (batch(0, 0, [traffic(ids[:3])], ids[:3]), batch(8, 1, [power("node_offline")], ids[:3]),
                    batch(12, 2, [traffic(ids)], ids), batch(20, 3, [power("node_online")], ids))
         scenario = replace(base, scenario_id="source-stop-test", duration_s=32, services=services, batches=batches)
-        # This tick falls between the restored neighbor's packet and the device's own first reply.
+        # 该控制节拍正好落在邻居恢复探针到达与设备自身首条回复之间。
         controls = {"controller_id": "x", "qos_profile": "official", "probe_interval_ns": 500_000_000,
                     "service_report_interval_ns": 700_000_000, "observation_ttl_ns": 2_000_000_000,
                     "tick_ns": 100_010_472, "old_rule_retention_ns": 300_000_000, "command_validity_ns": 500_000_000,
@@ -165,7 +165,7 @@ class DestinationStopTests(unittest.TestCase):
 
         first = stops[0]
         dispatch = next(r for r in actions if r["event"] == "work_step" and r["work_id"] == first["work_id"])
-        # A subsequent delivered sign of life supersedes the planning permit at dispatch.
+        # 下发前新送达的在线迹象会覆盖规划阶段签发的停源许可。
         stamp = (first["time_ns"] + dispatch["time_ns"]) // 2
         down = first["source_stop"]
         receipt = next(r for r in probes.values() if r["probe"]["observed_at_ns"] == down["sampled_at_ns"]

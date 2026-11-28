@@ -1,7 +1,7 @@
-"""Budgeted deterministic paths and allocation, using only current visible state.
+"""有界确定性选路与分配求解器，仅读取当前可见网络状态。
 
-No reference paths, postEvents, simulator truth, or future events are accepted.
-QoS is an explicit flow-level development model, not packet simulation.
+不接受参考答案路径、未来事件或仿真器上帝视角真相；
+QoS 计算为显式流级开发模型，独立于底层逐包分组仿真。
 """
 from __future__ import annotations
 
@@ -104,7 +104,7 @@ def assess(nodes, links, requests, assignments, now):
 
 
 def candidate_paths(nodes, links, request, config):
-    """Uniform-cost bounded simple paths; parallel edges retain their linkIds."""
+    """搜索有界一致代价简单路径；两条节点间的平行链路各自保留独立 linkId。"""
     src,dst=request['srcNodeId'],request['dstNodeId']
     if src not in nodes or dst not in nodes or not nodes[src].get('_online',False) or not nodes[dst].get('_online',False):
         return [], {'expanded':0,'termination':'endpoint_unavailable','complete':True}
@@ -141,8 +141,8 @@ def solve(nodes, links, requests, current, now, config, method='priority_greedy'
     protected=set(config['protected_service_ids'])
     frozen=set() if initialize else healthy | (protected & set(active))
     if writable_service_ids is not None:
-        # OM can see requests whose device configuration is awaiting a fresh readback.
-        # Their wire reservations already count in the ledger; only this work order's IDs may change.
+        # OM 可以看到设备配置正等待新鲜读回的业务请求；
+        # 其链路预留已计入账本，仅允许改动本张工单明确授权的业务。
         frozen.update(set(requests) - set(writable_service_ids))
     for sid in frozen: target[sid]=copy.deepcopy(current.get(sid))
     work=sorted((sid for sid in active if sid not in frozen),key=lambda sid:(-active[sid]['priority'],sid))
@@ -163,7 +163,7 @@ def solve(nodes, links, requests, current, now, config, method='priority_greedy'
         best=copy.deepcopy(target); best_key=objective(active,best,current)
         trial={sid:copy.deepcopy(current.get(sid)) if sid in frozen else None for sid in requests}
         occupancy=loads(links,trial)
-        # Limit recursion independently of graph size; otherwise retain greedy.
+        # 递归上限与网络规模解耦；超预算时回退保留贪心解。
         search_work=work[:config.get('search_service_limit',12)]
         for sid in work[len(search_work):]:
             trial[sid]=copy.deepcopy(target[sid])

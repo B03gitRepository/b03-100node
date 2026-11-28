@@ -1,4 +1,4 @@
-"""Reconstruct the opening inventory from the sealed nominal inputs and native configuration."""
+"""依据封存的标称输入与原生配置，离线重建并核验开局底图与资源参数。"""
 from component_config import digest
 from scenario_manifest import archive_input, parse_json_bytes
 from .network import build_foundation, check_resources, resolve_network
@@ -19,7 +19,7 @@ def _native_resources(run, files, conditions):
     cases = {case["case_id"]: case for case in experiment["cases"]}
     case = conditions.get("case", "packet_control")
     if case not in cases and conditions.get("sceneOrigin", "official") == "official":
-        case = "official_control"  # Earlier installations also support the external bundled experiment.
+        case = "official_control"  # 早期部署环境也兼容外置打包实验配置。
     if case not in cases:
         raise ValueError("Startup experiment does not contain the selected case")
     merged = {}

@@ -1,4 +1,4 @@
-"""Start one packet simulation or verify the evidence from a previously completed run."""
+"""启动单次分组仿真工单，或离线核验历史运行归档。"""
 from pathlib import Path
 import sys
 

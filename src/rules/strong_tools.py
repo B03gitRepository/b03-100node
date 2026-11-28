@@ -1,5 +1,5 @@
-"""T096 classic recovery tools. Pure proposals; Runtime remains the only writer.
-Imports the frozen/current b03 solver from caller's sys.path. No future events.
+"""T096 经典规则工具集（A–L）：只产出纯配置提案，设备写入仍统一归主控执行。
+从调用方 sys.path 导入当前 b03 求解器，严格不使用任何未来事件。
 """
 from __future__ import annotations
 import copy, hashlib, itertools, json, time, warnings
@@ -35,8 +35,8 @@ def clone(x): return copy.deepcopy(x)
 def digest(x): return hashlib.sha256(json.dumps(x, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
 
 def enumerate_actions(snapshot, authority, config, history=None):
-    """Stable catalog. IDs are encoding only; semantic fields are authoritative.
-    Scope uses original service IDs, never hidden/future state or entity indices.
+    """稳定工具目录：工具 ID 仅作编码标识，实际语义以结构化字段为准。
+    作用域仅使用原始业务 ID，绝不泄露隐藏状态、未来事件或内部实体索引。
     """
     writable = sorted(set(authority["executableServiceIds"]) &
                       set(active_requests(snapshot["requests"], snapshot["observedAtSec"])))
@@ -68,7 +68,7 @@ def _setup(s, authority):
     base = {sid: clone(a) if sid not in writable else None for sid, a in current.items()}
     work = sorted(writable & set(active), key=lambda k: (-active[k]["priority"], k))
     caps = {lid: l["params"]["bandwidthBps"] if usable(s["nodes"], l) else 0 for lid, l in s["links"].items()}
-    # Frozen invalid assignments may already exceed physical capacity. Never worsen.
+    # 已被冻结的失效配置可能原本就超出当前物理容量，重排时绝不能使其进一步恶化。
     cap_guard = {lid: max(cap, loads(s["links"], base)[lid]) for lid, cap in caps.items()}
     return active, base, work, cap_guard
 
@@ -80,7 +80,7 @@ def _add(path, occupancy, sign):
         for lid in path["linkIds"]: occupancy[lid] += sign * path["allocatedBps"]
 
 def generate_pool(s, work, base, config, kind, budget):
-    """Candidate generation only. Capacity-aware ranking is not an allocator."""
+    """仅生成候选路径池；按容量排序用于候选筛选，并不直接占用或分配带宽。"""
     params = dict(config, path_limit=budget["pool_scan_limit"],
                   path_expansion_budget=budget["path_expansion_budget"])
     occupancy = loads(s["links"], base); pools = {}; audit = {}
@@ -117,8 +117,8 @@ def _greedy(base, work, pools, caps, links):
     return target
 
 def prepare_backups(snapshot, config, context=None, budget_name="small"):
-    """Explicit preparation/maintenance on one visible snapshot. No reservation.
-    Caller must charge this measured preparation and preserve cache across events.
+    """在单张可见快照上显式准备与维护备用路径（不扣减链路预留）。
+    调用方须计入本次准备耗时，并在跨事件间维护缓存状态。
     """
     context = {} if context is None else context
     w = time.perf_counter(); c = time.process_time()
@@ -162,7 +162,7 @@ def _local(s, active, base, work, pools, caps, budget):
     best = _greedy(base, work, pools, caps, s["links"]); key = objective(active, best, s["assignments"])
     count = 0; improvements = 0; exhausted = False
     search_work = [sid for sid in work if pools[sid]]
-    # Empty pools cannot participate in a reroute; do not spend pair budget there.
+    # 候选池为空的业务无法参与重路由，不为其消耗成对搜索预算。
     neighborhoods = list(itertools.combinations(search_work, 2)) + [(sid,) for sid in search_work]
     neighborhoods.sort(key=lambda group: (all(best[sid] is not None for sid in group), -len(group), group))
     for pass_id in range(budget["local_passes"]):
@@ -191,7 +191,7 @@ def _local(s, active, base, work, pools, caps, budget):
                   "maxJointNeighborhood": 2, "passes": pass_id+1, "finitePoolOptimal": False}
 
 def _milp(s, active, base, work, pools, caps, budget):
-    # SciPy exposes no x0 / MIP-start. Keep a checked greedy incumbent externally.
+    # SciPy HiGHS 接口未暴露 x0/MIP-start，因此在外层保留已校验的贪心可行解作兜底。
     import numpy as np
     import scipy
     from scipy.optimize import Bounds, LinearConstraint, milp
@@ -199,13 +199,13 @@ def _milp(s, active, base, work, pools, caps, budget):
     variables = [(sid, p) for sid in work for p in pools[sid]]
     if not variables:
         return incumbent, {"solverStatus": "empty_candidate_pool", "finitePoolOptimal": True, "variableCount": 0}
-    # Lexicographic priority counts over the decisions available in this pool.
-    # Each higher-priority unit dominates every lower-priority unit and change cost.
+    # 在当前候选池可执行决策上按优先级做字典序计数优化：
+    # 任何一条高优先级业务的权重都严格压倒全部低优先级业务及变更惩罚。
     mutable = {sid for sid, _ in variables}
     weights = formula.priority_coefficients(active[sid]["priority"] for sid in mutable)
     if max(weights.values(), default=0) * max(1, len(variables)) > 2**50:
         return incumbent, {"solverStatus": "objective_scaling_refused", "finitePoolOptimal": False}
-    # Counts are lexicographic, then fewer changed service assignments (historical objective).
+    # 目标函数沿用历史口径：先最大化字典序优先级保障数，平手时选配置变更最少的方案。
     costs = []
     for sid, p in variables:
         cur = s["assignments"].get(sid)
@@ -215,12 +215,12 @@ def _milp(s, active, base, work, pools, caps, budget):
     for sid in work:
         rows.append([float(k == sid) for k,p in variables]); lower.append(0); upper.append(1)
     occupied = loads(s["links"], base)
-    # Normalize bandwidth rows for HiGHS numeric stability; exact original guard rechecks.
+    # 对带宽约束行做归一化以提升 HiGHS 数值稳定性；求解后再用原精度关口复核。
     for lid in s["links"]:
         scale = max(1., caps[lid])
         rows.append([p["allocatedBps"]/scale if lid in p["linkIds"] else 0. for sid,p in variables])
         lower.append(-np.inf); upper.append((caps[lid]-occupied[lid])/scale)
-    # Enforce the same explicit changed-service ceiling checked after every tool.
+    # 在规划阶段即施加与事后校验完全一致的最大变更业务数上限。
     max_changes = int(budget.get("max_changed_services", len(s["assignments"])))
     constant_changes = sum(base[sid] != s["assignments"][sid] for sid in base)
     rows.append([1. if s["assignments"][sid] is None else (-1. if s["assignments"][sid] == p else 0.)
@@ -343,7 +343,7 @@ def solve_action(action, bound, context=None):
     return target, audit
 
 def choose_nonlearning(actions, snapshot):
-    """Current-state conditional scheduler; no counterfactual/oracle solver calls."""
+    """基于当前可见状态的条件固定调度器，不调用任何反事实或上帝视角求解器。"""
     indexed = {a["id"]:a for a in actions}
     metrics = assess(snapshot["nodes"],snapshot["links"],snapshot["requests"],snapshot["assignments"],snapshot["observedAtSec"])
     failed = metrics["requestCount"]-metrics["satisfiedCount"]

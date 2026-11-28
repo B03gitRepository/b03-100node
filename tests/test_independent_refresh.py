@@ -1,4 +1,4 @@
-"""Exercise the native query/ack implementation with controlled packet delivery order."""
+"""在可控回包顺序下测试原生查询/ACK 的单业务独立配置刷新逻辑。"""
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace

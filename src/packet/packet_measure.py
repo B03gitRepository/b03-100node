@@ -1,7 +1,7 @@
-"""Independent evaluation of installed device paths and original business seconds.
+"""对设备生效路径与原始业务保障秒数（U/W）进行独立计量。
 
-The actors never receive this object. Sampling is scheduled after native events at
-the same nanosecond. All durations use the SimPy clock and a half-open window.
+OM/RC 与模型均不可访问此计量对象；采样统一调度在同纳秒原生事件之后，
+所有时长统计均严格基于 SimPy 仿真时钟与左闭右开时间窗。
 """
 from __future__ import annotations
 

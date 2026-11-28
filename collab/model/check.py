@@ -1,4 +1,4 @@
-"""Test a frozen adapter with standard Python and the synthetic work order."""
+"""使用合成工单离线自测冻结模型适配器（仅依赖 Python 标准库）。"""
 import argparse
 from copy import deepcopy
 import importlib.util
@@ -9,6 +9,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 
 
+# 解码列默认值压缩表（indexed_table）：按位掩码将变化列覆写回默认值。
 def decode(table):
     out = []
     for key, mask, *replacements in table["rows"]:
@@ -23,6 +24,7 @@ def decode(table):
     return out
 
 
+# 校验模型适配器输出：不篡改观测、动作在合法目录内、概率分布归一化且不含宿主保留字段。
 def checked(actor, obs):
     original = deepcopy(obs)
     output = actor.choose(obs)

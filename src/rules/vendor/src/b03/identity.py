@@ -1,4 +1,4 @@
-"""Explicit identity for the RSS no-movement development capability."""
+"""无节点移动开发能力的显式身份声明。"""
 PROFILE_ID='b03-offline-flow-rss-nomove-v1'
 SEMANTICS_ID='b03.flow-qos-rss-nomove.v1'
 CAPABILITY_ID='b03.train.conf01-sce03-s0405.t119.rss-nomove.v1'

@@ -1,4 +1,4 @@
-"""Frozen RC tool choice over delivered packet evidence. All configuration writes stay in the work-order executor."""
+"""基于已送达分组观测的冻结模型 RC 工具选择模块；所有设备写入仍由工单执行器统一完成。"""
 from __future__ import annotations
 
 import hashlib
@@ -28,7 +28,7 @@ def file_digest(path):
 
 
 def indexed_table(columns, rows):
-    """Lossless column-default encoding; bit j replaces default j in the row."""
+    """无损列默认值压缩编码：掩码第 j 位为 1 时，用该行对应值替换第 j 列默认值。"""
     from collections import Counter
     defaults = []
     for j in range(1, len(columns)):
@@ -46,7 +46,7 @@ def indexed_table(columns, rows):
 
 
 def policy_observation(state, snapshot, ledger, diagnosis, config, actions):
-    """Project the OM/RC snapshot. The raw per-endpoint clocks remain in the work-order evidence."""
+    """将 OM/RC 快照投影为模型输入观测；逐端点的原始采样时钟保留在工单证据中。"""
     nodes = {name: i for i, name in enumerate(sorted(snapshot["nodes"]))}
     links = {name: i for i, name in enumerate(sorted(snapshot["links"]))}
     services = {name: i for i, name in enumerate(sorted(diagnosis["services"]))}

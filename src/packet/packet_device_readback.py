@@ -1,4 +1,4 @@
-"""Device-local evidence attached to replies to native, independently issued queries."""
+"""解析并校验挂载在原生独立查询 ACK 上的设备本地配置读回证据。"""
 
 
 FIELDS = ("next_node_id", "link_id", "reserved_bps", "lease_until_ns")
@@ -74,7 +74,7 @@ def phase_matches(phase, decision, epoch, node, state):
 
 
 def refresh_matches(decision, epoch, node, state, demand):
-    """A retired demand may have stopped its source while its old forwarding still occupies the ledger."""
+    """校验刷新读回是否与预期一致：已退场的业务可能已停源，但其旧转发规则仍占用链路账本。"""
     if not demand or not demand["fresh"] or not path_rule_matches(decision, node, state):
         return False
     source = state["source"]
@@ -107,7 +107,7 @@ def path_rule_matches(decision, node, state):
 
 
 def operation_matches(action, state):
-    """Postcondition of one uncertain native write at the queried node."""
+    """校验某条结果不明的原生写指令在目标节点上是否已达成预期后置状态。"""
     op, epoch, source = action["op"], action["epoch"], state["source"]
     if op in ("prepare", "install"):
         expected = rule_fields(action)

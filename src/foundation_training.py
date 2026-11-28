@@ -1,4 +1,4 @@
-"""Optimize a foundation-aware selector from sealed, on-policy development episodes."""
+"""基于封存的同策略开发回合回执，离线更新底图策略选择器参数。"""
 from __future__ import annotations
 
 import argparse
@@ -17,10 +17,10 @@ from scene import PROFILE
 
 
 def paired_conditions(conditions):
-    """Retain physical, software, policy and authority identities across independent draws."""
+    """校验多组独立采样回合的物理场景、软件版本、策略配置与权限边界完全一致。"""
     normalized = deepcopy(conditions)
-    # The verifier authenticates each complete manifest before this comparison.
-    # Only the two sampler seeds and the three digests derived from them may differ.
+    # 执行配对比较前，核验器已先校验每份完整运行清单的合法性。
+    # 成对回合之间只允许两个采样种子及由其派生的三项摘要不同，其余条件必须完全一致。
     components = normalized["components"]
     components["model"]["options"].pop("drawSeed", None)
     components.pop("manifestSha256")
@@ -68,8 +68,8 @@ def load_rollout(path, parameters):
                 or c["behaviorProbability"] != expected[c["selected"]]):
             raise ValueError("Features, sampled action probability or checkpoint differ on replay")
         step["features"] = x
-    # A counterfactual baseline at the same time comes from a different rollout of this case.
-    # Store integral U(t), never W. Paired seeds must use the same starting conditions.
+    # 同一时刻的反事实基线必须来自同一工况的另一条独立采样轨迹。
+    # 仅存储未加权积分 U(t)，严禁将加权指标 W 混入训练目标；配对种子须同起点。
     ends, prefix, counts = [], [0], []
     for row in intervals:
         ends.append(row["end_ns"])
@@ -144,7 +144,7 @@ def update(parameters, examples, *, epochs=4, learning_rate=0.16, clip=0.15):
 
 
 def feature_evidence(before, after, examples, gradients):
-    """Describe when each feature could influence the observed two-tool update."""
+    """统计各特征在 B/I 双工具均合法时的采样分布、非零优势次数、首轮净梯度与权重变化。"""
     evidence = {}
     for index, name in enumerate(FEATURES):
         seen = {symbol: 0 for symbol in before["symbols"]}
@@ -163,7 +163,7 @@ def feature_evidence(before, after, examples, gradients):
 
 
 def matched_observations(episodes):
-    """Count different sampled actions at an identical observed state and paired conditions."""
+    """在相同工况与完全一致的观测状态下，统计采到不同动作时的剩余 U 分布差异。"""
     states = defaultdict(lambda: defaultdict(set))
     for episode in episodes:
         for step in episode["result"]["steps"]:

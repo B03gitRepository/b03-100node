@@ -1,4 +1,4 @@
-"""Controller-boundary and algorithm regressions using the original QoS and capacity validator."""
+"""借助原始 QoS 与容量校验器测试规则组件边界与算法回归。"""
 from copy import deepcopy
 from pathlib import Path
 import sys
@@ -56,7 +56,7 @@ class RuleContracts(unittest.TestCase):
                 shadow = {**deepcopy(snap["requests"]["one"]), "serviceId": "retained", "priority": 7}
                 snap["requests"]["retained"] = shadow
                 snap["assignments"]["retained"] = None
-                # Its device reservation was deducted from observed capacity. OM grants only 'one'.
+                # 其设备预留已从可观测容量中扣除，本单 OM 仅授权改写 one 业务。
                 frozen["authority"]["readableServiceIds"].append("retained")
                 rebind(frozen)
                 catalog = strong_tools.enumerate_actions(snap, frozen["authority"], frozen["config"])

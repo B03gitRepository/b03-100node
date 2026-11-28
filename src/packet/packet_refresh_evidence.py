@@ -1,4 +1,4 @@
-"""Portable validation of independent pre-dispatch configuration queries."""
+"""下发前独立业务配置刷新的便携式离线核验器（无需导入仿真器）。"""
 from bisect import bisect_left, bisect_right
 from collections import Counter, defaultdict
 
@@ -13,6 +13,7 @@ def require(ok, message):
         raise ValueError("Independent refresh: " + message)
 
 
+# 跟踪每项业务的独立刷新未决义务，供排空状态机判定是否仍有悬而未决的刷新任务。
 def refresh_obligation(pending, row):
     event = row["event"]
     key = row.get("service_id"), row.get("epoch")
@@ -37,6 +38,7 @@ def refresh_obligation(pending, row):
                 del pending[stored]
 
 
+# 逐条重放独立刷新指令、读回与结算，严格校验 TTL、版本号、路径一致性及先核权再写入纪律。
 def verify_refresh(conditions, clock, controller, actions):
     identifier = conditions.get("configurationRefreshContract")
     member = "src/packet/packet_refresh.py"
@@ -131,7 +133,7 @@ def verify_refresh(conditions, clock, controller, actions):
                 stream = demand[sid]
                 left = bisect_left(stream, now, key=lambda x: x[0])
                 right = bisect_right(stream, now, key=lambda x: x[0])
-                # Equal-clock probe and role logs lack a common sequence. Account for both possible arrival orders.
+                # 同纳秒下的探针日志与角色日志没有全局公共序号，需同时兼容两种可能到达顺序。
                 candidates = [dict(m, fresh=now - m["observed_at_ns"] <= ttl)
                               for _, m in stream[max(0, left - 1):right]]
                 proofs = [all(refresh_matches(choice, row["epoch"], n, r["result"], sample) for n,r in reads.items())

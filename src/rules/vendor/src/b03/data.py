@@ -1,4 +1,4 @@
-"""Read official package with an explicit information boundary."""
+"""按明确的信息边界读取官方场景数据包。"""
 from __future__ import annotations
 import hashlib, json, math, re
 from pathlib import Path

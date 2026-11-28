@@ -1,4 +1,4 @@
-"""Checks on the editable knowledge packs used by simulation startup."""
+"""校验仿真启动阶段可编辑场景知识包的完整性与隔离边界。"""
 from copy import deepcopy
 import json
 from pathlib import Path
@@ -24,7 +24,7 @@ class NetworkCatalogTests(unittest.TestCase):
                                 self.pack["resources"], self.pack["nodeCapabilities"])
 
     def test_static_links_project_channel_and_services_hide_schedule(self):
-        # A later declaration could reveal workload changes before the reporting node is heard.
+        # 若提前暴露后续业务声明，会在上报节点送达前泄密负载变化。
         future = dict(self.services[0], serviceId="LATER", startAtSec=4)
         self.services.append(future)
         original = deepcopy(self.topology)
@@ -52,7 +52,7 @@ class NetworkCatalogTests(unittest.TestCase):
             shutil.copytree(self.pack["directory"], root)
             for name, body in (("net-topo.json", self.topology), ("bg-service.json", self.services)):
                 (root / name).write_text(json.dumps(body), encoding="utf-8")
-            # Verify the external fixture with the native reader before checking its public projection.
+            # 先用原生读取器校验外部夹具，再核对其公开底图投影。
             native = load_scenario(root)
             external = resolve_external(ROOT, root / "manifest.json")
             view = build_foundation(self.topology, self.services, None, self.pack["resources"],
@@ -84,7 +84,7 @@ class NetworkCatalogTests(unittest.TestCase):
         self.assertEqual(view["channelModel"]["model"], "scenario-link-parameters")
 
     def test_external_foundation_only_records_the_measured_interface_count(self):
-        # External competition inputs do not declare allowed media or maximum interfaces.
+        # 赛事官方外部输入不包含允许链路类型或最大接口数声明。
         self.topology["links"].extend(dict(self.topology["links"][0], linkId=f"parallel-{i}") for i in range(12))
         external = resolve_external(ROOT)
         foundation = build_foundation(self.topology, self.services, None,

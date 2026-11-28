@@ -1,4 +1,4 @@
-"""Public packet extension contract. This module uses only the Python standard library."""
+"""分组仿真扩展的公开回调契约实现（仅依赖 Python 标准库）。"""
 from copy import deepcopy
 from tempfile import SpooledTemporaryFile
 import hashlib
@@ -39,7 +39,7 @@ def hash_record(accumulator, data):
 
 
 class Ports:
-    """Dispatch detached records. Only the event port may request a local sensing action."""
+    """向扩展组件分发深拷贝数据记录；四类端口中仅事件端口允许返回本地探针调度请求。"""
 
     def __init__(self, provider=None):
         self.provider = provider
@@ -76,7 +76,7 @@ class Ports:
         if self.provider is None:
             self._deliver(channel, data)
             return
-        # Persist detached values in occurrence order, with bounded RAM even on a long simulation.
+        # 按发生顺序持久化深拷贝记录，确保长时仿真下内存占用有界。
         if self._replay is None:
             self._replay = SpooledTemporaryFile(max_size=256 * 1024, mode="w+b")
         row = json.dumps([channel, data], separators=(",", ":"), allow_nan=False)
@@ -85,7 +85,7 @@ class Ports:
     def finish(self, drain_ns):
         if self.terminal or type(drain_ns) is not int or drain_ns < 0:
             raise RuntimeError("Post-drain simulator callbacks require one finished episode")
-        # Disable all action-bearing callbacks before exposing any evaluator or undelivered device truth.
+        # 在暴露评价器或未送达设备真相前，先关闭所有可发起动作的回调入口。
         self.terminal = True
         try:
             if self._replay is not None:

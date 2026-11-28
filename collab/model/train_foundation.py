@@ -1,4 +1,4 @@
-"""Train the optional selector with previously sampled, verified work orders."""
+"""基于已采样并核验通过的历史工单，训练可选的底图策略选择器。"""
 from pathlib import Path
 import sys
 

@@ -1,4 +1,4 @@
-"""A small replaceable topic/alias retriever over versioned public entry IDs."""
+"""可替换的轻量级知识检索示例：基于公开条目编号做主题与别名召回排序。"""
 class RankedKnowledge:
     def __init__(self, config, library):
         self.rows = {r["id"]: r for r in library["entries"]}

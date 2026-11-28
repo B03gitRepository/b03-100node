@@ -1,4 +1,4 @@
-"""An in-memory ID and topic index over one released knowledge edition."""
+"""基于单个已发布知识版构建内存级编号与主题索引的检索器示例。"""
 
 
 class TopicIndex:

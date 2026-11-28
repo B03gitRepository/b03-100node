@@ -1,4 +1,4 @@
-"""Top up the original priority-greedy deployment on its remaining capacity."""
+"""在原优先级贪心初配结果的剩余容量上，补充搜索漏接业务的可行路径。"""
 from __future__ import annotations
 
 import heapq
@@ -33,7 +33,7 @@ def validate_settings(config):
 
 
 def residual_links(available, load, request):
-    """Capacity uses the same addition and tolerance as the native allocation guard."""
+    """剩余容量计算与原生分配关口保持完全一致的累加顺序与浮点容差。"""
     demand = request['requirement']['bandwidthBps']
     return {lid: link for lid, link in available.items()
             if formula.within_capacity(load[lid] + demand, link['params']['bandwidthBps'], EPS)}
@@ -81,10 +81,10 @@ def lower_bounds(adjacency, destination, metric):
 
 
 def guided_search(nodes, edges, request, config):
-    """Best-first *simple* paths with four admissible remaining-cost bounds.
+    """带四项可采纳剩余代价下界的最佳优先简单路径搜索。
 
-    Labels carry their visited nodes, so merging unlike histories cannot discard
-    the only feasible suffix. An exhausted expansion/hop budget is inconclusive.
+    搜索标签携带已访问节点集合，防止合并不同历史路径时误删唯一可行后缀；
+    若触达扩展步数或跳数上限仍未找到解，视为预算耗尽（而非证明无解）。
     """
     src, dst = request['srcNodeId'], request['dstNodeId']
     budget = config['path_expansion_budget']
@@ -112,8 +112,8 @@ def guided_search(nodes, edges, request, config):
     start = (0., 0., 0., 0.)
     delay_bound = bounds.get(0, {})
     h0 = delay_bound.get(src, 0.)
-    # Small remaining delay breaks ties in equal-cost contours without opening
-    # thousands of all-prefix routes before reaching the first destination.
+    # 用极小比例的剩余时延打破等代价并列，避免在到达终点前无谓展开
+    # 成千上万条等长前缀路径。
     queue = [(h0, h0, next(order), start, (src,), ())]
     hit_hops = False
     near_boundary = False
@@ -172,7 +172,7 @@ def find_path(nodes, available, load, request, config):
 
 
 def supplement(nodes, links, requests, initial, config):
-    """Only use time-zero facts. Previously installed paths keep their complete allocation."""
+    """仅使用 0 秒开局事实做补接；已安装路径的原有带宽分配保持原样不动。"""
     start = time.perf_counter()
     cpu = time.process_time()
     active = active_requests(requests, 0)

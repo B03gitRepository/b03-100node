@@ -1,4 +1,4 @@
-"""A portable physical-port detector, using the simulator's four public data callbacks."""
+"""基于仿真器四类公开数据回调端口实现的轻量级端口变化检测示例。"""
 
 
 class LocalPortDetector:

@@ -1,4 +1,4 @@
-"""Public entry for sampling a B03 work order or evaluating a sealed run."""
+"""B03 工单采样与封存结果评价的统一对外入口。"""
 from pathlib import Path
 import sys
 

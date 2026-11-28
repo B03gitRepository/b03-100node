@@ -1,4 +1,4 @@
-"""Run a partner's simulator callbacks without the packet engine or official data."""
+"""脱离分组仿真引擎和官方数据集，单独自测合作方仿真器的四类回调接口。"""
 import argparse
 import importlib.util
 import json
@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from simulator_ports import Ports, VERSION
 
 
+# 自测流程：通过四类纯数据端口依次回放事件、观测、设备与计量样例，校验身份与探针调度约束。
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--provider", type=Path, default=ROOT / "src/example_public_simulator.py")

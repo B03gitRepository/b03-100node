@@ -1,4 +1,4 @@
-"""Replay the knowledge delivered to each agent against the sealed work-order inputs."""
+"""基于封存的工单输入，离线回放并核验投递给各角色的知识条目。"""
 import hashlib
 import json
 
@@ -9,8 +9,8 @@ from .work_order import (BINDING_CONTRACT, accepts_model, accepts_rules, check_b
 
 
 def _check_pending_cleanups(events):
-    # A plan can see a parked release only after the executor records its deferral.
-    # Recovery resumes that work order before the next planning snapshot is taken.
+    # 只有执行器正式记录释放挂起后，后续规划才可见该挂起项。
+    # 失联节点恢复唤醒后，会在下一轮规划快照采集前接续该工单。
     pending = {}
     last = -1
     for row in events:
@@ -27,8 +27,8 @@ def _check_pending_cleanups(events):
         if event in ("cleanup_deferred", "release_parked"):
             if work in pending:
                 raise ValueError("Cleanup was already deferred for this work order")
-            # A missing acknowledgment for a stop request leaves the source state unknown.
-            # Only confirmed stops can serve as evidence for cleanup-specific OM guidance.
+            # 停源请求未收到确认回执时，源端状态仍视为未知。
+            # 仅当源端停发已确认，才可作为触发清理类 OM 知识指引的依据。
             pending[work] = row["service_id"] if event == "cleanup_deferred" or row["source_stop_confirmed"] else None
         elif event in ("cleanup_recovery_probe", "release_recovery_probe"):
             if work not in pending:
@@ -113,7 +113,7 @@ def verify(conditions, events, entries, identity):
             if ("knowledgeContext" in target) != delivered or delivered and target["knowledgeContext"] != records[port]["output"]:
                 raise ValueError("Consumer context differs from delivered knowledge")
         match_slot(diagnosis, "om", "om" in enabled)
-        # Earlier archives predate the RC input record. New producers include it for every OM handoff.
+        # 早期归档早于 RC 知识输入字段上线；新版回执对每次 OM 交接均完整记录。
         has_input = "rc_knowledge_input_ids" in plan
         new_producer = ("knowledge/work_order.py" in conditions.get("implementationSha256", {})
                         or conditions.get("knowledgeBindingContract") == BINDING_CONTRACT)
@@ -136,7 +136,7 @@ def verify(conditions, events, entries, identity):
 
 
 def verify_work_order_queries(conditions, events):
-    """Replay lookup results and decision evidence from the sealed run, without importing providers."""
+    """无需导入原始检索插件，直接基于封存回执离线重放知识查询与决策证据。"""
     proof = conditions.get("provenance", {})
     required = conditions.get("mode") == "workorder" and "knowledge" in proof.get("activeComponents", {})
     plans = [r for r in events if r["event"] == "b03_rc_plan"]

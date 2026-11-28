@@ -1,9 +1,7 @@
-"""Single-writer, atomic event-boundary checkpoints for the offline runtime.
+"""面向离线运行时的单写入者原子事件边界检查点存储。
 
-The stable lock file is never replaced or unlinked. The checkpoint is private
-environment state and contains the future event queue; never give it to roles.
-Guarantee: process-exit recovery after a successful complete-file replacement.
-No external-device exactly-once or cross-platform power-loss guarantee is made.
+稳定的锁文件永不被替换或删除；检查点包含未来事件队列，属环境私有状态，严禁交给角色。
+可靠性边界：完整文件原子替换后可抵御进程崩溃重启，不做外部设备恰好一次或跨平台掉电承诺。
 """
 from __future__ import annotations
 
@@ -35,7 +33,7 @@ class WriterLockedError(RuntimeError):
 
 
 class CheckpointStore:
-    """Hold this context through load, all steps, save, and result persistence."""
+    """在加载、逐步推进、保存及结果落盘全程持有该单写锁上下文。"""
     def __init__(self,run_dir):
         self.run_dir=Path(run_dir).resolve()
         self.path=self.run_dir/'checkpoint.json'
@@ -113,11 +111,11 @@ class CheckpointStore:
                 stream.write(raw); stream.flush(); os.fsync(stream.fileno())
             if fail_before_replace: raise OSError('INJECTED_SAVE_FAILURE_BEFORE_REPLACE')
             os.replace(temporary,self.path)
-            # Replacement is the process-recovery commit point. A subsequent
-            # directory-sync failure must not leave the in-memory sequence stale.
+            # 原子文件替换即进程崩溃恢复的正式提交点；随后即使目录 fsync 失败，
+            # 也不得让内存中的序列号滞后于磁盘。
             runtime.commit_sequence=payload['state']['commit_sequence']
             directory_sync={'attempted':os.name!='nt','succeeded':None}
-            # Directory sync is attempted only on POSIX; no Windows power-loss claim.
+            # 仅在 POSIX 系统上尝试目录同步，不做 Windows 掉电持久化承诺。
             if os.name!='nt':
                 try:
                     fd=os.open(self.run_dir,os.O_RDONLY)

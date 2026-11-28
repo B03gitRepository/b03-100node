@@ -1,4 +1,4 @@
-"""Run a bounded online update or verify its replay in a fresh process."""
+"""执行单步有界在线 PPO 更新，或在新进程中复核权重与采样回放。"""
 from pathlib import Path
 import sys
 

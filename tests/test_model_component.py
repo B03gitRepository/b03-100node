@@ -1,4 +1,4 @@
-"""Packet model boundary tests using synthetic observations and CPU-only adapter fixtures."""
+"""使用合成观测与纯 CPU 夹具验证模型组件边界与契约约束。"""
 from copy import deepcopy
 import json
 import math
@@ -51,7 +51,7 @@ def choose(policy, symbols=("D", "B", "A")):
 
 
 class SampledFixture:
-    """Exercise sampling and checkpoint hooks without training a production model."""
+    """无需训练生产模型，直接验证采样概率与检查点保存/恢复钩子的测试夹具。"""
     def __init__(self, **kwargs):
         self.version = 7
         self.rng = random.Random(9)

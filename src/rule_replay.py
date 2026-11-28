@@ -1,12 +1,12 @@
-"""Reconstruct rule inputs and final device decisions using sealed observations and host contracts."""
+"""基于封存观测与宿主契约，离线重建规则输入与最终设备决策。"""
 from pathlib import Path
 from types import SimpleNamespace
 import sys
 
 
 def host_roles():
-    # The bundled packet package supplies the standard-library QoS arithmetic.
-    # Importing the role helpers starts neither an engine nor an A2A server.
+    # 内置分组包已提供仅依赖标准库的 QoS 算术工具。
+    # 导入角色辅助模块不会启动仿真引擎或 A2A 服务。
     from scene import ROOT
     packet = str(ROOT / "src" / "packet")
     bundled = str(ROOT / "simulator" / "resnet_py" / "src")
@@ -18,7 +18,7 @@ def host_roles():
 
 
 def replay_diagnosis(conditions, state):
-    """Rebuild the OM view using the archived grant and the reports delivered by this tick."""
+    """使用归档授权与当前控制节拍前已送达的报告，离线重建 OM 诊断视图。"""
     roles = host_roles()
     grant = conditions["authority"]
     allowed = None if grant["discovery"] == "all_delivered_registered" else grant["allowedServiceIds"]
@@ -28,8 +28,8 @@ def replay_diagnosis(conditions, state):
     allowed, protected = agents.scopes(state)
     snapshot, ledger = roles._model(state, waterline, allowed - protected)
     config = roles._configuration(protected, snapshot)
-    # Older runs delivered the same probes but could not open a destination-stop order.
-    # Use their sealed producer inventory; replay must not retroactively grant that authority.
+    # 旧版本运行虽然也送达了同样的探针，但当时尚不支持开启目的离线停源工单；
+    # 此处按封存的产出方源码清单判定，离线回放绝不能事后追授新权限。
     allow_source_stop = "src/packet/destination_guard.py" in conditions.get("implementationSha256", {})
     diagnosis = roles._diagnose(state, snapshot, ledger, config, allowed, protected,
                                 allow_source_stop=allow_source_stop)
@@ -82,7 +82,7 @@ def verify_final(conditions, plan, state, request, roles, snapshot, config, ledg
         raise ValueError("Final rule allocation could not be reconstructed")
     check_final(request,target)
     bound = {"snapshot":snapshot,"authority":authority}
-    # The public span validator consumes the original common binding as well.
+    # 公开区间核验器同样复用原始公共绑定信息。
     bound.update(config=config,identity=audit["binding"])
     logical = roles.candidate_scope(bound,bound,target)
     physical, release, install, projected = roles._device_plan(bound,state,target,ledger,audit)

@@ -1,4 +1,4 @@
-"""Bounded time-of-first-work-order admission on the delivered residual network."""
+"""首张授权工单触发时的有界残余容量补接检查（对应知识条目 K044）。"""
 import b03_formulas as formula
 from b03.initial_admission import find_path
 from b03.solver import active_requests, loads, path_errors, usable
@@ -23,8 +23,8 @@ def check_opening(target, snapshot, config, authority, mode, hold, *, rule_reque
         config = dict(config, max_path_hops=budget["maxHops"])
         conditional = rule_request.get("conditionalReservations", {})
         explicit = set((rule_output or {}).get("patch", {}))
-        # Previously verified epochs still occupy their links until a specific write
-        # will retire them. A stale epoch cannot silently turn into a repair request.
+        # 此前已确认的旧代际路径在收到明确退场写指令前仍持续占用链路，
+        # 过期代际不会静默演变为修复请求。
         for sid in conditional.keys() - explicit:
             for lid in conditional[sid]["linkIds"]:
                 occupancy[lid] += conditional[sid]["allocatedBps"]

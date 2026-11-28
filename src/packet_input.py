@@ -1,4 +1,4 @@
-"""Lossless range encoding for complete over-limit packet observations without changing the delivered evidence."""
+"""针对超 token 上限的完整分组观测做无损区间压缩编码，不删减任何已送达证据。"""
 from __future__ import annotations
 
 from hashlib import sha256
@@ -24,7 +24,7 @@ def _id(value):
 
 
 def _runs(ids):
-    """Keep input order, duplicates and gaps. Compress only runs of three or more IDs."""
+    """保持原始顺序、重复项与间隔；仅对长度不少于 3 的连续编号段做区间压缩。"""
     encoded = []
     for _, group in groupby(enumerate(map(_id, ids)), key=lambda item: item[1] - item[0]):
         run = [item[1] for item in group]
@@ -46,7 +46,7 @@ def _expand(ids):
 
 
 def encode_observation(raw):
-    """Change only zero-mask default node rows and runs within individual authorized scopes."""
+    """仅压缩零掩码默认节点行以及各授权业务集内的连续编号段。"""
     if raw.get("schema") != SCHEMA or _MARKER in raw:
         raise ValueError("Expected an original released packet observation")
     node_rows = []
@@ -60,7 +60,7 @@ def encode_observation(raw):
 
 
 def decode_observation(delivered):
-    """Recover the original JSON observation, including every exception and the scope ordering."""
+    """完整还原原始 JSON 观测，包括所有例外行及作用域顺序。"""
     if _MARKER not in delivered:
         return delivered
     if delivered[_MARKER] != _INSTRUCTIONS:
@@ -88,7 +88,7 @@ class InputTooLong(ValueError):
 
 
 def fit_complete_input(actor, observation, raw_ids, original_messages):
-    """Fit an over-limit prefill by verified inclusive ranges. Refuse an incomplete observation."""
+    """通过可逆闭区间编码把超限观测压缩进预填充窗口；拒绝不完整的截断观测。"""
     encoded = encode_observation(observation)
     if canonical(decode_observation(encoded)) != canonical(observation):
         raise ValueError("Packet input range round-trip changed the original observation")

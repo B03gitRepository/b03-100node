@@ -1,4 +1,4 @@
-"""Independent receipt replay for the native packet engine's delivered queue reports."""
+"""验证原生分组引擎已送达队列报告及滞回状态的离线独立重放。"""
 from copy import deepcopy
 from pathlib import Path
 import sys

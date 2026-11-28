@@ -1,4 +1,4 @@
-"""Load a model adapter and verify a model decision from its saved packet receipt."""
+"""加载模型适配器，并依据保存的分组回执离线核验模型决策记录。"""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ def _symbols(values, label):
 
 
 def load_model(components, checkpoint, tokenizer, device, frozen_actor):
-    """Return the actor and the identity to put in CONDITIONS.json."""
+    """加载模型实例，同时返回需写入 CONDITIONS.json 的策略身份信息。"""
     cfg = deepcopy(components.model)
     if not isinstance(cfg, dict) or not all(_text(cfg.get(k)) for k in ("id", "entrypoint", "catalogVersion")):
         raise ValueError("Model registration requires id, entrypoint and catalogVersion")
@@ -99,10 +99,10 @@ def _distribution(value, legal, name):
 
 
 def validate_model_choice(choice, policy_identity):
-    """Return True for an auditable model tool_choice, otherwise raise ValueError.
+    """核验单条模型 tool_choice 记录是否可审计；合法返回 True，否则抛出 ValueError。
 
-    policy_identity is CONDITIONS.rcPolicy. Historic native receipts use parameterVersion.
-    This function does not load a checkpoint or call an adapter.
+    policy_identity 对应 CONDITIONS.rcPolicy；历史原生回执使用 parameterVersion。
+    本函数不加载权重检查点，也不调用适配器推理。
     """
     if not isinstance(choice, dict) or not isinstance(policy_identity, dict):
         raise ValueError("Expected a tool choice and a policy identity")

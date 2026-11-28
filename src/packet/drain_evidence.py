@@ -1,4 +1,4 @@
-"""Report outstanding device work at the configured inclusive drain boundary."""
+"""在配置的有界排空截止时刻（含边界），汇总并核验尚未完结的设备工单状态。"""
 from __future__ import annotations
 
 import json
@@ -17,6 +17,7 @@ def file_rows(path):
                 yield json.loads(line)
 
 
+# 根据截止时刻前的已送达控制日志与工单回执，重算有界排空终态账本。
 def drain_receipt(conditions, clock, controller, actions):
     cfg = conditions["simulation"]
     end = clock["end_ns"]
@@ -131,6 +132,7 @@ def drain_receipt(conditions, clock, controller, actions):
             "unresolvedDemandIds": unknown, "outsideWriteAuthorityIds": outside}
 
 
+# 交叉比对控制分组投递日志与控制器业务观测日志，防止漏报或篡改需求到达记录。
 def _verify_demand_deliveries(controller, packets, destination):
     rows = {row["packet_uid"]: row for row in controller if row["event"] == "service_observation"}
     for packet in packets:
@@ -145,6 +147,7 @@ def _verify_demand_deliveries(controller, packets, destination):
         raise ValueError("Drain demand report lacks a delivered service packet")
 
 
+# 离线核验归档中的 drainStatus；旧版未启用排空契约的历史归档自动跳过兼容。
 def verify_drain(conditions, summary, controller, actions, packets):
     contract = conditions.get("drainContract")
     marker = "src/packet/drain_evidence.py"

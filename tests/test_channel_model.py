@@ -1,4 +1,4 @@
-"""Regression tests for channel projection, physical inputs and archive replay."""
+"""信道噪声折算、有效物理输入生成及离线归档回放的回归测试。"""
 from argparse import ArgumentParser, Namespace
 from copy import deepcopy
 import json
@@ -159,7 +159,7 @@ class ChannelArchiveTests(unittest.TestCase):
             with patch.object(sys, "path", [str(engine / "src"), *sys.path]):
                 from resnet.io import load_scenario
                 native = load_scenario(source)
-                # A validation timeline repeats scripted operations. The engine cross-checks it at load.
+                # 验证时间线复述了脚本中的事件操作，引擎在加载时会交叉校验。
                 timeline = {"schema": "project-execution-batches-v1", "batches": [
                     {"time_s": b.time_s, "sim_time_us": b.time_us, "apply_before_packet_generation": True,
                      "operations": list(b.operations), "profile": b.profile, "active_service_ids": list(b.active_service_ids)}
@@ -191,7 +191,7 @@ class ChannelArchiveTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 check_custom_inputs(run, {k: v for k, v in conditions.items() if k != "channelModel"}, files)
 
-            # Rewrite the effective bandwidth and recompute both recorded digests. Independent replay must still fail.
+            # 故意篡改有效带宽并重算两项摘要，独立回放仍必须识别并报错。
             name = config["files"]["topology"]
             target = effective / name
             forged = read(target)

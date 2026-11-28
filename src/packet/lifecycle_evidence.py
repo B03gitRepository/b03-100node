@@ -1,4 +1,4 @@
-"""Offline checks for controller-owned expiry, device retirement and the next delivered work order."""
+"""离线核验业务到期停用、设备释放退场以及后续工单衔接的生命周期一致性。"""
 from collections import Counter, defaultdict
 
 
@@ -89,7 +89,7 @@ def _check_retired(plan, state, event, events, reads, before, recovered_balance)
                  and (source is None if node != path[0] else source is not None and
                       source["enabled"] is False and source["rate_bps"] == 0), wid, f"device retained old epoch for {sid}/{node}")
     if recovered_balance is not None:
-        # The independent trace audit checked every intermediate full ledger after the yield.
+        # 独立轨迹审计已在每次让出控制权后核查过全部中间完整账本。
         before.clear()
         before.update(recovered_balance)
     for lid in choice["link_path"]:
@@ -99,7 +99,7 @@ def _check_retired(plan, state, event, events, reads, before, recovered_balance)
 
 
 def check_lifecycle(plans, acts, demand_index, conditions, probe_index=None):
-    """Check current receipts. Historical component-v1 archives use their original lifecycle contract."""
+    """核验当前工单回执的生命周期记录；component-v1 历史归档沿用其原始契约。"""
     counts = dict(releaseOrders=0, confirmedReleases=0, followupOrders=0,
                   activeServicesReassessed=0, pendingReleaseOrders=0, pendingReassessments=0)
     plans = [p for p in plans if p["event"] == "b03_rc_plan"]
@@ -125,8 +125,8 @@ def check_lifecycle(plans, acts, demand_index, conditions, probe_index=None):
     by_next_plan = {}
     unsigned_followups = 0
     if interleaved:
-        # A parked order may finish after a newer one. Bind each sign-off to the actual
-        # next planned snapshot in trace order, including equal-clock events.
+        # 挂起工单可能在更新的工单之后才完结；因此每笔签收必须按实际轨迹顺序
+        # （含同纳秒事件）绑定到真正紧随其后的下一次规划快照。
         previous_signoff = None
         for row in acts:
             if row["event"] in ("work_verified", "work_incomplete"):

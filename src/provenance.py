@@ -1,7 +1,7 @@
-"""Identify the implementation actually selected by a packet run.
+"""采集并核验单次分组运行实际生效的源码、组件与依赖环境指纹。
 
-A source verifier looks up the installed distributions without running a provider factory.
-The ordinary receipt verifier never calls the environment collection functions.
+源码核验直接扫描已安装的发行包而不执行插件工厂函数；
+普通便携归档核验不会触发本地环境采集逻辑。
 """
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ def active_kinds(policy, manifest=None):
 
 
 def changed(expected, actual, prefix=""):
-    """Report paths and both values, including individual files in a distribution."""
+    """递归比对并列出路径与新旧值差异（细化到发行包内的单个文件）。"""
     if isinstance(expected, dict) and isinstance(actual, dict):
         differences = []
         for key in sorted(expected.keys() | actual.keys()):
@@ -56,7 +56,7 @@ def changed(expected, actual, prefix=""):
 
 
 def tree(path):
-    """Fingerprint a relocatable file or source/data directory without recording its location."""
+    """为可迁移的单文件或源码/数据目录计算内容指纹，不把本机绝对路径写入摘要。"""
     path = Path(path).expanduser().resolve(strict=True)
     if path.is_file():
         return {"type": "file", "sha256": sha256(path)}
@@ -88,7 +88,7 @@ def module_file(module):
 
 
 def local_module(name):
-    """Capture the whole top-level package, including sibling modules and package data."""
+    """捕获整个顶层本地包（含同级子模块与包内资源数据）的完整内容指纹。"""
     if not isinstance(name, str) or not name.isidentifier():
         raise ValueError("provenance.localModules must name importable top-level packages or modules")
     spec = util.find_spec(name)
@@ -130,7 +130,7 @@ def package_roots(distribution):
 
 
 def check_namespace_children(name, root, locations, owned):
-    """With multiple namespace portions, check which portion supplies each importable child."""
+    """面对多目录命名空间包时，逐一核对每个可导入子模块实际由哪段路径提供。"""
     children = defaultdict(set)
     for path in owned:
         if not path.is_relative_to(root):
@@ -146,8 +146,8 @@ def check_namespace_children(name, root, locations, owned):
             children[parts[0]].add(path)
     for child, paths in children.items():
         fullname = name + "." + child
-        # The explicit parent search path is already resolved. A bare child name lets the
-        # finder describe a nested namespace without requiring its parent in sys.modules.
+        # 父目录搜索路径已显式解析完毕；使用纯子模块名可让查找器定位嵌套命名空间，
+        # 而无需提前把父模块加载进 sys.modules。
         spec = machinery.PathFinder.find_spec(child, locations)
         if spec is None:
             continue
@@ -163,7 +163,7 @@ def check_namespace_children(name, root, locations, owned):
 
 
 def supporting_files(location, installed, module, hash_file):
-    """Include importable files left beside a wheel by a previous install or local tooling."""
+    """把同目录下由旧安装或本地工具遗留的可导入辅助文件一并纳入指纹校验。"""
     extra = {}
     for folder, dirs, names in os.walk(location):
         dirs[:] = sorted(d for d in dirs if d not in IGNORE_DIRS)
@@ -175,7 +175,7 @@ def supporting_files(location, installed, module, hash_file):
 
 
 def distribution_record(distribution, installed):
-    """Read the installed bytes, including the contents of native modules and package data."""
+    """读取已安装发行包的实际字节内容（含原生编译扩展模块与包数据）。"""
     name = distribution.metadata["Name"]
     editable = editable_source(distribution)
     editable_modules = installed.local_roots
@@ -192,8 +192,8 @@ def distribution_record(distribution, installed):
         if "__pycache__" in item.parts:
             continue
         in_metadata = any(p.endswith((".dist-info", ".egg-info")) for p in item.parts[:-1])
-        # These installer bookkeeping files contain machine-local URLs, generated file lists
-        # and cache entries. The effective source and metadata are read independently below.
+        # 这类安装器元数据文件包含本机路径 URL、自动生成列表与缓存项，
+        # 实际生效的源码与元数据会在下方独立读取校验。
         if in_metadata and item.name in {"RECORD", "INSTALLER", "REQUESTED", "direct_url.json"}:
             continue
         if editable and not in_metadata and (item.suffix == ".pth" or item.name.startswith("__editable__")):
@@ -237,8 +237,8 @@ def distribution_record(distribution, installed):
                 raise ValueError(f"Installed dependency {name} is shadowed at import {module}: {locations}")
             claimed = installed.package_files(module, name, live)
             if origin is not None and origin not in live:
-                # Multiple wheels may fill different subpackages of the same regular package.
-                # Its effective initializer must be installed in this package by a contributor.
+                # 多个 wheel 可能分别向同一个常规包贡献不同的子包；
+                # 其生效的 __init__.py 必须由其中一个贡献发行包提供。
                 if origin.parent != root or origin not in claimed:
                     raise ValueError(f"Installed dependency {name} is shadowed at import {module}: {origin}")
                 shared_initializers[module + "/" + origin.name] = installed.hash_file(origin)
@@ -281,7 +281,7 @@ class Distributions:
         self._hashes = {}
 
     def hash_file(self, path):
-        # This cache lives for one collection. Strict verification starts a fresh collection.
+        # 该缓存仅在单次采集内有效；严格核验每次都会重新发起全新采集。
         if path not in self._hashes:
             self._hashes[path] = sha256(path)
         return self._hashes[path]
@@ -297,8 +297,8 @@ class Distributions:
             return live
         if module not in self._shared_files:
             claimed = set()
-            # A venv can expose multiple site-packages roots. Use the real location of every
-            # RECORD member so a namespace contributor cannot satisfy a different directory.
+            # 虚拟环境可能暴露多个 site-packages 根目录；按 RECORD 成员的真实物理路径核对，
+            # 防止命名空间贡献包混入其他目录的同名文件。
             for owner in names:
                 for dist in metadata.distributions(name=owner):
                     for item in dist.files or ():
@@ -353,7 +353,7 @@ class Distributions:
                 dist = metadata.distribution(req.name)
             except metadata.PackageNotFoundError as exc:
                 raise ValueError(f"Missing distribution {req.name} required by {parent}") from exc
-            # A published requirement is part of the trace. Reject an environment failing it.
+            # 已发布的依赖声明属于运行溯源的一部分，不满足的环境直接拒绝通过。
             if req.specifier and not req.specifier.contains(dist.version, prereleases=True):
                 raise ValueError(f"{parent} requires {req}, installed {dist.metadata['Name']} {dist.version}")
             extras = {""} | {canonical_name(extra) for extra in req.extras}
@@ -377,7 +377,7 @@ def active_registration(components, policy):
             reg["sha256"] = sha256(components.knowledge_path)
         config = reg.get("provenance", {})
         if "assets" in config:
-            # A logical asset name is portable. The bytes below identify its content.
+            # 资产的逻辑名称可跨机迁移，实际内容由下方字节摘要唯一锁定。
             config["assets"] = sorted(config["assets"])
         result[kind] = reg
     return result
@@ -429,7 +429,7 @@ def checkout_files(root, native):
         paths.extend([root / "config/model.json", root / "requirements-model.txt"])
     if (root / "src/b03_formulas.py").is_file():
         paths.append(root / "knowledge/formulas-v1.json")
-    # A partner factory may delegate to any published helper, including the examples.
+    # 合作方工厂函数可以委托调用仓内任何公开辅助模块（含示例模块）。
     paths.extend(checkout_python_files(root))
     return {p.relative_to(root).as_posix(): sha256(p) for p in sorted(paths)}
 
@@ -502,7 +502,7 @@ def capture_provenance(root, components, *, checkpoint=None, tokenizer=None, pol
     assets = model_assets(root, native, policy_identity, checkpoint, tokenizer) if policy == "model" else {}
     knowledge = components.knowledge_path.read_bytes()
     files = checkout_files(root, native)
-    # Bind the actual preset chain used for this run, including inherited knowledge presets.
+    # 绑定本次运行实际生效的预设继承链（含继承引入的知识预设）。
     for path in components.input_paths:
         if path.is_relative_to(root / "knowledge" / "presets"):
             files[path.relative_to(root).as_posix()] = sha256(path)
@@ -539,10 +539,10 @@ def verify_provenance(archived, root, components=None, *, checkpoint=None, token
                                     policy_identity=policy_identity, runtime=archived["runtimeRequirements"])
     except (ValueError, OSError, KeyError, ImportError) as exc:
         return [str(exc)]
-    # Raw knowledge bytes have a separately checked digest. Do not print their complete text.
+    # 原始知识字节已有独立摘要校验，日志输出中不展开全文。
     expected = {k: v for k, v in archived.items() if k not in ("fingerprint", "knowledge", "gitCommit")}
     current = {k: v for k, v in actual.items() if k not in ("fingerprint", "knowledge", "gitCommit")}
-    # Local wheel URLs and archive availability depend on how the same installed files were obtained.
+    # 本地 wheel URL 与归档可用性取决于安装方式，不影响已安装文件本身的等价性。
     for detail in (expected, current):
         detail["distributions"] = {
             name: {k: v for k, v in record.items() if k != "installationWheelSha256"}

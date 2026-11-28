@@ -1,4 +1,4 @@
-"""Example I solver: prioritize scarce routes and use residual capacity to seed bounded pair search."""
+"""工具 I 改进示例：优先保障可选路径稀缺的业务，并利用剩余容量引导有界成对搜索。"""
 from copy import deepcopy
 
 import strong_tools
@@ -34,7 +34,7 @@ class ResidualFirstRules:
         pools, search = strong_tools.generate_pool(s, work, base, config, action["pool"], budget)
         occupancy = loads(s["links"], base)
 
-        # At the same original priority, protect the demands with the fewest usable choices.
+        # 在相同原始优先级下，优先照顾可行候选路径最少的业务。
         order = sorted(work, key=lambda sid: (
             -active[sid]["priority"], sum(strong_tools._fits(p, occupancy, caps) for p in pools[sid]), sid))
         for sid in order:
@@ -48,7 +48,7 @@ class ResidualFirstRules:
             if paths and strong_tools._fits(paths[0], occupancy, caps):
                 strong_tools._add(paths[0], occupancy, 1)
 
-        # Reuse I's original finite pair/single-service neighborhoods and search ceilings.
+        # 复用工具 I 原有的有界双业务/单业务邻域结构及搜索步数上限。
         target, detail = strong_tools._local(s, active, base, order, pools, caps, budget)
         if sum(target[sid] != old for sid, old in s["assignments"].items()) > budget["max_changed_services"]:
             target = deepcopy(s["assignments"])

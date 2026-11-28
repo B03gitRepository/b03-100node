@@ -1,9 +1,8 @@
-"""Pure-Python offline discrete-event controller and flow allocation environment.
+"""纯 Python 离线离散事件控制与流分配求解环境。
 
-The driver owns future events. Decisions receive copies of current visible state.
-ACK, configuration readback, and analytical business QoS are separate observations.
-Recovery covers committed event-boundary snapshots of this offline environment.
-It does not claim transactions with external devices or an official simulator.
+事件驱动器独自持有未来事件队列，决策层仅接收当前可见状态的深拷贝；
+ACK、配置读回与解析型业务 QoS 分别独立记录；检查点仅覆盖本离线环境的事件边界状态，
+不宣称与外部实体设备或官方仿真器构成分布式事务。
 """
 from __future__ import annotations
 
@@ -141,7 +140,7 @@ class Runtime:
             if sid in self.requests: raise ValueError('DUPLICATE_SERVICE_ID')
             self.requests[sid]=req
         if set(self.config['protected_service_ids'])-set(self.requests): raise ValueError('UNKNOWN_PROTECTED_SERVICE')
-        # Only driver queue holds the event suffix; never put it in observations.
+        # 只有事件驱动器队列保存未来事件后缀，绝不放入角色可见观测。
         self.queue=[]; self.sequence=0; self.now=0.0; self.state_version=0; self.config_version=1
         self.objective_revision=0; self.objective_version=self.config['objective_version']+'/r0'
         self.trace=[]; self.intervals=[]; self.workorders=[]; self.ledger={}; self.current=None
@@ -184,7 +183,7 @@ class Runtime:
         return self.wall_elapsed_base+time.perf_counter()-self.wall_start
 
     def export_checkpoint(self,*,commit_sequence=None):
-        """Environment-private snapshot; safe only between complete step calls."""
+        """导出环境私有快照；仅可在完整单步事件推进之间安全调用。"""
         from .persistence import code_fingerprints, CheckpointError
         if self._stepping or getattr(self,'_step_failed',False): raise CheckpointError('NOT_AT_VALID_EVENT_BOUNDARY')
         if code_fingerprints()!=self.source_fingerprints: raise CheckpointError('SOURCE_CHANGED_DURING_RUN')
@@ -202,7 +201,7 @@ class Runtime:
 
     @classmethod
     def restore_checkpoint(cls,payload,*,expected_config_hash=None,expected_input_hash=None):
-        """Restore committed state without initialization, admission, or event replay."""
+        """直接恢复已提交状态，不重新触发初始化、初配准入或历史事件重放。"""
         from .persistence import code_fingerprints, CheckpointError
         if payload.get('schemaVersion')!='b03.environment-private-checkpoint.rss.v1' or payload.get('visibility')!='environment_private':
             raise CheckpointError('PRIVATE_CHECKPOINT_SCHEMA_MISMATCH')
@@ -415,8 +414,8 @@ class Runtime:
 
     def observation(self):
         wo=self.current; wo['attempts']+=1; wo['dirty']=False; wo['status']='planning'
-        # Each attempt owns its timestamps; retries must not subtract an earlier
-        # attempt's first ACK/apply from a later attempt's submission time.
+        # 每次尝试独立记录自己的时间戳；重试时不得把前一次尝试的首次 ACK/生效时间
+        # 错算成后一次提交的耗时。
         timing={'attemptId':wo['workOrderId']+'-attempt-%02d'%wo['attempts'],
                 'attemptNumber':wo['attempts'],'eventTimeSec':wo['eventTimeSec'],
                 'observationAvailableSec':self.now,'planGeneratedSec':None,
@@ -491,14 +490,14 @@ class Runtime:
             self.push(self.now+self.config['action_delay_sec'],3,'action',{'workOrderId':wo['workOrderId']})
 
     def lookup_action(self,action_id):
-        """Read-only evidence query; does not retry or infer business success."""
+        """只读查询历史动作证据，不触发重试，也不自行推断业务是否成功。"""
         return copy.deepcopy(self.ledger.get(action_id))
 
     def submit_action(self,action,expected_versions=None,*,inject_failure=False,ack_lost=False):
-        """Same ID/payload returns the original result, including failures/unknowns.
+        """同一动作 ID 与载荷重复提交时原样返回历史结果（含失败或未知状态）。
 
-        A new attempt requires a new actionId. The environment and this ledger
-        become durable together only when CheckpointStore.save succeeds.
+        发起新尝试必须使用新的 actionId；环境状态与账本仅在 CheckpointStore.save
+        成功落盘后才共同持久化。
         """
         aid=action.get('actionId'); payload_hash=digest(action)
         if aid in self.ledger:
@@ -663,7 +662,7 @@ class Runtime:
             elif kind=='readback': self.readback()
 
     def step(self):
-        """Advance one full event boundary. Only the store can make it durable."""
+        """推进一个完整事件边界；持久化落盘由外部 CheckpointStore 统一负责。"""
         start=len(self.trace)
         if self.done: return {'done':True,'eventKind':None,'timeSimSec':self.now,'traceStart':start,'traceEnd':start}
         if self._stepping or getattr(self,'_step_failed',False): raise RuntimeError('INVALID_STEP_STATE')
@@ -689,7 +688,7 @@ class Runtime:
         return self.finalize()
 
     def finalize(self):
-        """Read-only result projection of a completed runtime; never replays work."""
+        """对已结束的运行做只读结果投影汇总，不重放任何工单操作。"""
         if not self.done: raise RuntimeError('RUN_NOT_COMPLETE_USE_STEP_OR_RUN')
         final=self.metrics()
         den=sum(r['requestSeconds'] for r in self.intervals); num=sum(r['satisfiedBusinessSeconds'] for r in self.intervals)
@@ -745,5 +744,5 @@ class Runtime:
 
 
 def run_scenario(topology, requests, events, config=None, *, method='priority_greedy', run_id=None):
-    """Run one scenario in memory. The caller owns immutable result persistence."""
+    """在内存中执行单场景运行，由调用方负责不可变结果的持久化保存。"""
     return Runtime(topology,requests,events,config,method,run_id).run()

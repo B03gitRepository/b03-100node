@@ -1,4 +1,4 @@
-"""The deferred cleanup proof must protect a retained epoch without the simulator."""
+"""验证脱离仿真器时，离线挂起清理证据仍能完整保护尚未退场的链路预留。"""
 from collections import defaultdict
 from pathlib import Path
 import sys
@@ -76,7 +76,7 @@ class DeferredCleanupTests(unittest.TestCase):
         loop.native_log=lambda row: None
         loop._event=lambda *args, **kwargs: None
         loop._defer_expired_cleanup(18)
-        self.assertIsNotNone(loop.work)  # A nonterminal readback can also produce 'unknown'.
+        self.assertIsNotNone(loop.work)  # 非终态读回同样可能返回 unknown。
         loop.pending={"command":{"command_id":"q","target_node_id":"lost",
                                  "action":{"op":"query","service_id":"old","epoch":1}}}
         row={"event":"command_timeout","operation":"query","time_ns":17,"plan_id":"plan","command_id":"other-q"}
@@ -140,7 +140,7 @@ class DeferredCleanupTests(unittest.TestCase):
         self.assertEqual(record["work"]["queue"], [])
         self.assertEqual(set(record["work"]["failures"]), {"new","other"})
         self.assertEqual(events[-1]["event"],"release_parked")
-        # Only a probe that was sampled after parking and reached the cache may wake this transaction.
+        # 只有挂起之后新采样并送达缓存的探针，才允许唤醒该挂起事务。
         def snapshot(stamp):
             return {"links":{"one":{"reporters":{"source":{"received_at_ns":22, "probe":{
                 "observed_at_ns":stamp, "node_online":True, "seq":5, "link":{"link_id":"one"}}}}}}}
@@ -251,7 +251,7 @@ class DeferredCleanupTests(unittest.TestCase):
         links = {"links":{"one":{"usable":False,"reason":"stale_endpoint_observation","reporters":{"neighbor":report,"lost":None}}}}
         demands = {"services":{}}
         self.assertEqual(offline_node_signature(links,demands,10,8), ("lost",))
-        # A fresh repeat and a new sequence/time do not change the decision key.
+        # 新鲜重复上报或新序号/时间戳不会改变决策触发键。
         report["received_at_ns"]=report["probe"]["observed_at_ns"]=13
         self.assertEqual(offline_node_signature(links,demands,14,8), ("lost",))
         demands["services"]["svc"]={"fresh":True,"node_id":"lost","observed_at_ns":13}

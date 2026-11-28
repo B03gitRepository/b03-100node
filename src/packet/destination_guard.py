@@ -1,4 +1,4 @@
-"""Authorize stopping a known source epoch from delivered endpoint evidence."""
+"""基于已送达端点证据，在目的节点确认离线时授权主控直通叫停源端发包。"""
 
 from bisect import bisect_right
 from collections import defaultdict
@@ -6,10 +6,10 @@ from operator import itemgetter
 
 
 def _offline_destinations(services, ports):
-    """Keep the newest affirmative and negative observations for each node.
+    """为每个节点保留最新的在线与离线观测证据。
 
-    Only a live neighbor on an administratively up port can attest to an
-    offline peer. A concurrent or newer sign of life cancels that evidence.
+    只有管理态开启（admin_up）的在线邻居才能证明对端离线；
+    一旦收到同时刻或更新的在线迹象，即撤销离线判定。
     """
     alive, missing = {}, {}
     for row in services.values():
@@ -31,7 +31,7 @@ def _offline_destinations(services, ports):
 
 
 def offline_destinations(state):
-    """Evaluate the delivered role view and keep the identifying witness for dispatch."""
+    """评估角色视图中的已送达观测，保留用于下发核验的离线证人探针。"""
     ports = ((lid, who, link["dst_node_id"] if who == link["src_node_id"] else link["src_node_id"],
               p["sampled_at_ns"], p["admin_up"], p["endpoint_online"])
              for lid,link in state["links"].items() for who,p in link.get("reports", {}).items()
@@ -40,7 +40,7 @@ def offline_destinations(state):
 
 
 def offline_node_signature(links, demands, now, ttl):
-    """Compare failure meaning at the control tick without copying every probe into a role view."""
+    """在控制节拍上比较目的离线判定语义，避免把全部探针全量拷贝进角色视图。"""
     def delivered_ports():
         for lid, link in links["links"].items():
             for who, record in link["reporters"].items():
@@ -55,7 +55,7 @@ def offline_node_signature(links, demands, now, ttl):
 
 
 def choose_source_stop(state, writable, healthy):
-    """One guarded release at a time, highest wasted wire rate first."""
+    """每次只授权一条受保护的源端停发工单，优先叫停占用线速最高的无效流量。"""
     if not state["confirmed"]:
         return None
     offline = offline_destinations(state)
@@ -78,7 +78,7 @@ def choose_source_stop(state, writable, healthy):
 
 
 def port_witness(node, since, now, ttl, reports, *, online, last_service_sample=-1):
-    """Select the latest fresh port evidence only when no contrary sample is as recent."""
+    """仅当不存在同样新鲜的反向在线样本时，才选取最新的端口离线证据。"""
     best = None
     opposed_at = -1 if online else last_service_sample
     for reporter, probe, arrived in reports:
@@ -106,7 +106,7 @@ def port_witness(node, since, now, ttl, reports, *, online, last_service_sample=
 
 
 class DeliveredNodeEvidence:
-    """Index accepted arrivals for relevant nodes and reconstruct their latest per-port reports."""
+    """为相关节点索引已接受的到达探针，并重建各端口最新上报状态。"""
 
     def __init__(self, nodes, probes, demands):
         self.ports = {node: defaultdict(list) for node in nodes}
@@ -146,7 +146,7 @@ class DeliveredNodeEvidence:
 
 
 def verify_source_stops(plans, events, probe_index, demand_index, conditions):
-    """Replay the planning and dispatch permits against the most recent accepted network deliveries."""
+    """依据最新已接受的网络送达记录，离线复核规划与下发阶段的停源授权。"""
     marked = [plan for plan in plans if plan.get("source_stop")]
     if not marked:
         return 0

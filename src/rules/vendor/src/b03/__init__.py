@@ -1,3 +1,3 @@
-"""B03 deterministic offline runtime; no official simulator or model claims."""
+"""B03 确定性离线求解核心包（纯算法层，不含官方仿真器或模型推理）。"""
 
 __version__ = "0.1.0"

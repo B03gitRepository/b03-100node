@@ -1,8 +1,7 @@
-"""Full-parameter online PPO from the pinned 100-node v374 actor.
+"""基于锁定的 100 节点 v374 策略权重执行全参数在线 PPO 训练。
 
-The replay journal stores actual observations, sampling probabilities and measured
-unweighted packet returns. Each committed version reconstructs from the original
-checkpoint by one deterministic optimizer step per recorded update.
+回放日志记录真实已送达观测、采样概率及实测未加权分组回报；
+每个已提交版本都可从原始基座检查点按日志确定性重放单步优化器更新完整复原。
 """
 from __future__ import annotations
 
@@ -30,7 +29,7 @@ def _digest(value):
 
 
 def _fingerprints(model):
-    """Merkle-style digest of every byte, tensor name, shape and dtype, including the backbone."""
+    """对全部权重（含主干网络）的字节内容、张量名、形状和精度计算 Merkle 风格指纹。"""
     per_tensor = {}
     manifest = []
     for name, tensor in sorted(model.named_parameters()):
@@ -74,7 +73,7 @@ def _sample_index(probabilities, uniform):
 
 @contextmanager
 def _journal_lock(path):
-    """Stable inode across atomic journal replacement; the OS releases it on process exit."""
+    """通过稳定的文件 inode 持有原子替换锁，进程退出时由操作系统自动释放。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.with_name(path.name + ".lock").open("a+b") as stream:
         if os.name == "nt":
@@ -148,7 +147,7 @@ def unweighted_advantage(credit):
 
 
 class PacketLearner(FrozenActor):
-    """A DecisionPolicy actor with explicit sampled and greedy modes."""
+    """支持显式随机采样模式与贪婪推理模式的 DecisionPolicy 策略封装。"""
 
     def __init__(self, checkpoint, tokenizer, device="cuda", *, seed=13201,
                  exploration=0.25, lr=1e-3, clip=0.2, grad_clip=1.0, max_updates=16):
@@ -279,7 +278,7 @@ class PacketLearner(FrozenActor):
                 self.device.type, dtype=torch.bfloat16, enabled=cuda, cache_enabled=False):
             logits = self.model(input_ids=x, attention_mask=mask, use_cache=False,
                                 logits_to_keep=1, return_dict=True).logits[0, -1, columns]
-            # Twelve scalars at most. FP64 preserves the frozen categorical likelihood.
+            # 合法工具最多 12 个标量，统一用 FP64 计算以保真冻结策略的分类似然精度。
             log_pi = logits.double().log_softmax(0)
             epsilon = self.algorithm["exploration"]
             if epsilon:
@@ -435,8 +434,8 @@ class PacketLearner(FrozenActor):
                 losses.append(loss.item())
                 ratios.append(ratio.item())
                 score_errors.append(abs(live.item() - row["oldLogp"]))
-                # Activation checkpoint recomputation runs during backward. Keep the same
-                # SDPA backend there as in the original complete prefill.
+                # 反向传播时会触发激活检查点重算，此处确保与原完整前向预填充
+                # 使用完全一致的 SDPA 注意力后端。
                 with self._attention_kernel():
                     loss.backward()
                 del log_q, live, ratio, surrogate, loss
@@ -488,7 +487,7 @@ class PacketLearner(FrozenActor):
         self.set_mode(self.mode)
 
     def update(self, samples, journal_path):
-        """Commit one online step from actual tool choices and unweighted future interval credits."""
+        """依据真实工具选择和未来区间未加权回报，提交一步在线 PPO 参数更新。"""
         self._ready()
         if self.mode != "sample":
             raise ValueError("Switch to sample mode before updating with online observations")
@@ -522,7 +521,7 @@ class PacketLearner(FrozenActor):
                 "journalSha256": self._journal_hash}
 
     def restore(self, journal_path):
-        """Reconstruct and verify every committed weight byte from v374, without resampling."""
+        """无需重新采样，直接从 v374 基座确定性重算并逐字节校验每个已提交版本的权重。"""
         self._ready()
         if self.version != BASE or self._cursor or self._journal_hash is not None:
             raise ValueError("Restore requires a freshly loaded v374 actor and an unused sampling cursor")
@@ -558,7 +557,7 @@ class PacketLearner(FrozenActor):
                 "replayedOptimizerSteps": len(body["updates"]), "newOnlineUpdates": 0, "newOnlineSamples": 0}
 
     def save_checkpoint(self, path):
-        """Save the exact committed replay boundary, including the sampling cursor."""
+        """保存精确的已提交回放边界，包含当前采样器游标状态。"""
         self._ready()
         if self._committed_path is None or self._cursor != self._committed_cursor:
             raise ValueError("Save immediately after a committed update or restore")
@@ -579,7 +578,7 @@ class PacketLearner(FrozenActor):
                 "journalSha256": checksum, "nextDrawCursor": self._cursor}
 
     def restore_checkpoint(self, path):
-        """The runner supplies the base directory. A registered replay asset selects a later version."""
+        """由运行器提供基座权重目录，若配置登记了回放资产则继续还原到对应更新版本。"""
         source = Path(path).expanduser().resolve(strict=True)
         if source == self._base_directory:
             if self._resume_journal is None:

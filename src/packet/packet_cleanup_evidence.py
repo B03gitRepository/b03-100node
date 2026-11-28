@@ -1,4 +1,4 @@
-"""Reconcile held packet-device cleanups against chronological work and device receipts."""
+"""按工单与设备回执的时间顺序，离线核验挂起清理（deferred-cleanup）全过程及预留账本。"""
 from collections import Counter
 
 from destination_guard import DeliveredNodeEvidence
@@ -16,7 +16,7 @@ def _wire(ledger, decision, factor):
 
 
 def cleanup_budgets(acts, groups, conditions, probes, demands=None):
-    """Return the checked complete ledger immediately before each recovered retirement."""
+    """在每次恢复释放完成前，返回经核验的完整链路预留账本。"""
     policy = conditions.get("deviceRecovery", {})
     modern = policy.get("contractVersion") == "b03.deferred-cleanup.v2"
     parked = "release_parked" if modern else "cleanup_deferred"
@@ -51,7 +51,7 @@ def cleanup_budgets(acts, groups, conditions, probes, demands=None):
         balance = Counter(step["retained_wire_bps"])
         _require(old["wire_bps"] > 0 and all(balance[link] >= old["wire_bps"] for link in old["link_path"]),
                  "old epoch lacks its full wire reservation")
-        # No other operation can execute until the original transaction is parked.
+        # 在原事务正式挂起之前，不允许执行其他设备操作。
         scan = False
         woken = False
         held = None
@@ -130,7 +130,7 @@ def cleanup_budgets(acts, groups, conditions, probes, demands=None):
                 timed_out = {r["command_id"] for r in events["native_command_timeout"]
                              if r["operation"] == "query" and r["command_id"] in sent_queries
                              and original["issued_at_ns"] < r["time_ns"] <= now and r["plan_id"] == step["plan_id"]}
-                # Earlier receipts omitted the query ID on the hold event. Resolve those from native timeouts.
+                # 早期回执在挂起事件中未附带查询编号，此处从原生超时记录中补齐。
                 _require(timed_out and ("timed_out_query_id" not in row or row["timed_out_query_id"] in timed_out),
                          "missing timed-out read-only reconciliation for the expired cleanup")
                 ready = False

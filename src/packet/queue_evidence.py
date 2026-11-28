@@ -1,11 +1,11 @@
-"""Replay delivered port samples and queue hysteresis from sealed packet and controller logs."""
+"""基于封存的分组与控制器日志，离线重放已送达端口样本及队列拥堵滞回状态。"""
 from bisect import bisect_left
 from collections import defaultdict
 from operator import attrgetter
 from typing import NamedTuple
 
 
-# A portable archive can be verified without importing the recorded simulator.
+# 便携式归档核验无需导入原仿真器代码即可独立运行。
 PEER_V2 = "peer_endpoint_v2"
 BUNDLED_PROBE_SEMANTICS = {
     "910891e496a8c16e6b9ba134abab1e0cbd6b7dd95c31fbb5da7d3ad190b27e30": None,
@@ -74,8 +74,8 @@ def _port_histories(controller, endpoints, ttl, limit):
 
 
 def _visible_sample(stream, ref, now):
-    # These two logs have separate record order. A delivery strictly before the snapshot is mandatory.
-    # Deliveries at the snapshot clock can have run just before or just after the controller tick.
+    # 分组日志与控制器日志顺序独立：严格早于快照时刻送达的探针必须已入账，
+    # 同纳秒送达的探针则可能落在控制节拍之前或之后。
     boundary = bisect_left(stream, now, key=attrgetter("arrived"))
     before = stream[boundary - 1] if boundary else None
     if ref is None:

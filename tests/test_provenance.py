@@ -1,4 +1,4 @@
-"""Exercise real local wheels, editable providers, model assets and sealed legacy evidence."""
+"""测试本地 wheel、可编辑安装包、模型资产及封存历史回执的溯源核验。"""
 from __future__ import annotations
 
 import base64
@@ -31,7 +31,7 @@ def dump(path, data):
 
 
 def wheel(folder, name, payload, requires=(), top=None):
-    """Build a standard pure-Python wheel, with a complete PEP 427 RECORD."""
+    """构造带完整 PEP 427 RECORD 清单的标准纯 Python wheel 测试包。"""
     stem = name.replace("-", "_")
     prefix = stem + "-1.0.dist-info/"
     content = dict(payload)
@@ -173,7 +173,7 @@ class EvidenceTests(unittest.TestCase):
         self.assertIn("b03_fixture_actor/unlisted.py", "\n".join(self.strict(archive, components)))
 
     def test_shared_regular_and_namespace_packages_hash_each_file_once(self):
-        # The addon ships no initializer for the regular package, as with several NVIDIA wheels.
+        # 附加包不为常规父包提供 __init__.py（与部分 NVIDIA wheel 行为一致）。
         reads = []
         def count(path):
             reads.append(path)
@@ -205,7 +205,7 @@ class EvidenceTests(unittest.TestCase):
         (before / "b03_fixture_ns/multi/other").mkdir(parents=True)
         importlib.invalidate_caches()
         self.assertIn("b03-fixture-addon", Distributions().collect(["b03-fixture-addon"]))
-        # An earlier implicit top-level namespace can also hide an actual installed child.
+        # 先前存在的隐式顶层命名空间也可能遮蔽实际已安装的子模块。
         ns = before / "b03_fixture_ns/second"
         ns.mkdir(parents=True)
         (ns / "__init__.py").write_text("hidden = True\n")
@@ -287,7 +287,7 @@ class EvidenceTests(unittest.TestCase):
         }
 
     def test_sealed_archive_after_removing_provider_and_weights(self):
-        # This synthetic v2 archive predates the formula edition and its two source pins.
+        # 该合成 v2 归档早于公式版本及其两项源码锚点上线。
         for member in ("src/b03_formulas.py", "knowledge/formulas-v1.json"):
             (self.root / member).unlink()
         components = self.components(model=self.registration).activate("model")

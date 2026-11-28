@@ -1,4 +1,4 @@
-"""Verify a saved packet run from native files, without starting the simulator or its agents."""
+"""仅读取归档原生文件，无需启动仿真器或智能体即可完成全链路离线核验。"""
 from __future__ import annotations
 
 import argparse
@@ -65,7 +65,7 @@ def demand_original(row):
 
 
 def verify_service_definitions(conditions, summary, initial, events):
-    """Check the selected request definitions against initial demands and scripted additions."""
+    """核对本次选中的业务定义是否与开局初始需求及事件脚本中后续新增业务一致。"""
     raw = {row["serviceId"]: row for row in initial}
     for event in events:
         if event["eventType"] == "service_adjust":
@@ -94,7 +94,7 @@ def verify_service_definitions(conditions, summary, initial, events):
         if row is None or any(row.get(k) != definition.get(k) for k in fields):
             raise ValueError("Archived service definition differs from its source: " + sid)
         req = row["requirement"]
-        # The native reader accepts both bandwidth spellings and stores time limits in seconds.
+        # 原生读取器同时兼容两种带宽字段拼写，并以秒为单位存储时延/抖动上限。
         expected = {"bandwidthBps": req.get("bandwidthBps", req.get("bandwitdhBps")),
                     "delayMs": formula.seconds_to_ms(req["delayMs"] / 1000),
                     "jitterMs": formula.seconds_to_ms(req["jitterMs"] / 1000),

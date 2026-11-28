@@ -1,4 +1,4 @@
-"""Independent rule search, transactional context and archived RC knowledge receipts."""
+"""测试独立规则搜索、事务性上下文提交及 RC 归档知识回执。"""
 from copy import deepcopy
 import json
 from pathlib import Path

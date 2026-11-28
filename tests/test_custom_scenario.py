@@ -1,4 +1,4 @@
-"""Custom scenes use the native packet format without assuming official names or control links."""
+"""验证自建场景可直接使用原生分组格式，不依赖官方节点命名或固定控制链路。"""
 import json
 import shutil
 import sys

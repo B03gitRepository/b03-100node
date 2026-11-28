@@ -1,9 +1,10 @@
-"""A standalone rule: route writable services in priority order using delivered links."""
+"""独立规则求解器示例：基于已送达链路状态，按优先级为可写业务搜索可行路径。"""
 from collections import Counter, defaultdict
 from heapq import heappop, heappush
 import b03_formulas as formula
 
 
+# 供规则组参考替换的最小求解器模板：实现 enumerate_actions（宣告工具）与 solve_action（输出差量补丁）。
 class Router:
     def enumerate_actions(self, request):
         return [row["id"] for row in request["candidates"] if row["tool"] == "ranked_feasible_path"]
@@ -52,6 +53,7 @@ class Router:
         return {"patch":patch, "audit":{"orderBy":order, "usedKnowledge":used, "expanded":expanded}}
 
 
+# 有界优先队列最短路搜索：逐跳检查剩余带宽与四项 QoS 上限，按跳数或时延排序返回首个可行路径。
 def find_path(service, neighbors, occupied, hop_limit, order, budget):
     req = service["requirement"]
     rate = req["bandwidthBps"]

@@ -1,4 +1,4 @@
-"""Static network facts available to both work-order roles before the first report arrives."""
+"""供 OM 与 RC 在首条探针到达前读取的开局静态网络底图及实时差量对比。"""
 from copy import deepcopy
 import hashlib
 import json
@@ -10,7 +10,7 @@ def evidence_digest(value):
 
 
 class AgentNetworkFacts:
-    """Keep one independent catalogue per simulation. Callers receive detached records."""
+    """每次仿真独立维护一份底图目录，对外只返回深拷贝副本以防篡改。"""
 
     def __init__(self, catalog):
         fields = {"schema", "nodes", "links", "initialServices", "channelModel", "resources"}
@@ -29,16 +29,16 @@ class AgentNetworkFacts:
         self.digest = evidence_digest(catalog)
 
     def lookup(self, section, identifier=None):
-        """Look up nodes, links, initialServices, channelModel or resources by their native IDs."""
+        """按原生编号查询节点、链路、初始业务、信道模型或资源上限。"""
         values = self._catalog[section]
         return deepcopy(values if identifier is None else values.get(identifier))
 
     def export(self):
-        """Hand a model adapter a detached copy once at initialization."""
+        """在初始化阶段向模型适配器交付一份独立的开局底图副本。"""
         return deepcopy(self._catalog)
 
     def compare_reports(self, state):
-        """Compare delivered measurements with the startup baseline; never infer link availability."""
+        """将已送达的实时观测与开局底图做差量对比，不自行臆测链路通断。"""
         below = {}
         for lid, report in state["links"].items():
             link = self._catalog["links"].get(lid)
@@ -55,7 +55,7 @@ class AgentNetworkFacts:
 
 
 def model_network_reference(comparison, state, diagnosis):
-    """Join anonymized table indices to known public IDs for adapters using the catalogue."""
+    """把匿名化观测表下标映射回公开编号，供启用了底图的模型适配器使用。"""
     links = state["links"]
     nodes = {row[key] for row in links.values() for key in ("src_node_id", "dst_node_id")}
     return {**deepcopy(comparison), "nodeIds": sorted(nodes), "linkIds": sorted(links),
@@ -64,7 +64,7 @@ def model_network_reference(comparison, state, diagnosis):
 
 
 def order_records(events, event, purpose=None):
-    """Index an event kind once, refusing ambiguous work-order receipts."""
+    """按工单索引指定事件类型，出现重复或歧义回执时直接拒收。"""
     rows = {}
     for row in events:
         if row["event"] == event and (purpose is None or row.get("purpose") == purpose):
@@ -76,7 +76,7 @@ def order_records(events, event, purpose=None):
 
 
 def verify_agent_facts(catalog, events, policy, model=None, authority=None):
-    """Recompute both role inputs from the sealed catalogue and the matching observation."""
+    """基于封存底图和对应工单观测，离线重算 OM 与 RC 两侧的底图差量输入。"""
     hook = policy.get("networkFoundationHook") is True
     if model is not None:
         registered = (policy.get("kind") == "model-adapter" and model.get("entrypoint") != "builtin"

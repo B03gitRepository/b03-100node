@@ -1,4 +1,4 @@
-"""Versioned selection of the model, rule solver, and read-only technical knowledge."""
+"""模型适配器、规则求解器、仿真扩展与只读技术知识的版本化配置加载器。"""
 from __future__ import annotations
 
 from copy import deepcopy
@@ -51,14 +51,14 @@ def read_manifest(path, ancestors=(), *, inputs=None, allow_missing=False):
     if not isinstance(value, dict):
         raise ValueError("Expected a JSON object in " + path.name)
     parent = value.pop("extends", None)
-    # Resolve the knowledge path against the manifest that declares it.
+    # 知识源文件路径相对于声明它的组件清单所在目录解析。
     knowledge = value.get("knowledge", {})
     if isinstance(knowledge, dict) and "source" in knowledge:
         source = (path.parent / knowledge["source"]).resolve(strict=not allow_missing)
         knowledge["source"] = str(source)
         if inputs is not None:
             inputs.add(source)
-    # Each asset is relative to the manifest that introduced it, including inherited entries.
+    # 每项外部资产路径均相对于引入它的那一层清单解析（含继承项）。
     for kind in PROVIDERS:
         part = value.get(kind, {})
         registration = part.get("provenance", {}) if isinstance(part, dict) else {}
@@ -76,7 +76,7 @@ def read_manifest(path, ancestors=(), *, inputs=None, allow_missing=False):
     if parent:
         base = read_manifest(path.parent / parent, (*ancestors, path), inputs=inputs, allow_missing=allow_missing)
         result = merged(base, value)
-        # Each port has one query. Its child declaration replaces the whole selector.
+        # 每个端口仅保留一条查询规则；子清单声明会整段覆盖父清单的选择器。
         bindings = knowledge.get("bindings") if isinstance(knowledge, dict) else None
         if isinstance(bindings, dict):
             result["knowledge"]["bindings"].update(deepcopy(bindings))
@@ -143,7 +143,7 @@ class ComponentSet:
         self._active = PROVIDERS
 
     def activate(self, policy):
-        """Only providers reachable in this run need an installed entry point."""
+        """仅对本次运行实际会触发的组件校验其入口模块是否已安装。"""
         from provenance import active_kinds
         active = active_kinds(policy, self._value)
         if self._active != active:

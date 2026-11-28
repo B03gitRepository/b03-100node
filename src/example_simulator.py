@@ -1,11 +1,11 @@
-"""Native-compatible packet provider with device-local link-change notifications."""
+"""兼容原生引擎的仿真适配器示例：在链路变化后按本地检测延迟触发端口上报。"""
 from __future__ import annotations
 
 from functools import partial
 
 
 def build(settings):
-    """Return a packet backend that samples changed ports after local detection latency."""
+    """构造分组仿真后端，在链路发生物理变化并经过检测延迟后主动采样上报。"""
     from resnet.simulation.simulation import Simulation
 
     if set(settings) != {"detectionDelayNs"}:

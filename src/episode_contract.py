@@ -1,4 +1,4 @@
-"""One full work order per sample. Trainer and evaluator have separate return types."""
+"""单次采样对应一张完整工单；训练采样与只读评价严格分离返回结构。"""
 from __future__ import annotations
 
 import argparse
@@ -12,7 +12,7 @@ import tempfile
 from scene import PROFILE, ROOT
 import b03_formulas as formula
 
-# Research splits are by full development script, including every derived window.
+# 训练与评测切分必须按完整官方开发脚本隔离，包含其派生的所有子时间窗。
 TRAIN_SCRIPTS = {20: {"01", "02", "04", "05"}, 100: {"04", "05"}}
 
 
@@ -35,7 +35,7 @@ def _jsonl(path):
 
 
 def trajectory(intervals, choices, verified_u):
-    """Partition the scored interval exactly once, including the prefix before any draw."""
+    """对整个计分时间窗做不重不漏的区间划分（含首次动作采样前的前缀时段）。"""
     ends, totals, counts = [], [0], []
     start = None
     for row in intervals:
@@ -74,7 +74,7 @@ def trajectory(intervals, choices, verified_u):
             raise ValueError("Unregistered action in verified trajectory")
         sample = {"observation": obs, "action": choice["selected"],
                   "policyVersion": choice.get("policyVersion", choice.get("parameterVersion"))}
-        # Report only what the actor actually logged. Greedy actions do not imply a draw.
+        # 仅如实回报策略实际记录的行为；贪婪选出的动作不能伪装为随机采样。
         for key in ("behaviorProbability", "behaviorProbabilities", "oldLogProbability", "sampleId"):
             if key in choice:
                 sample[key] = choice[key]
@@ -90,7 +90,7 @@ def trajectory(intervals, choices, verified_u):
 
 def sample(script, output, *, components=None, data=None, simulator=None, checkpoint=None,
            tokenizer=None, device="cpu", start=None, end=None, drain=None, services=None):
-    """Run a registered model on an authorized training script in a fresh worker."""
+    """在独立子进程中运行已登记模型，对获准训练脚本采样单回合工单轨迹。"""
     if script not in TRAIN_SCRIPTS[PROFILE["nodes"]]:
         permitted = ", ".join(sorted(TRAIN_SCRIPTS[PROFILE["nodes"]]))
         raise ValueError(f"Permitted training scripts for this profile: {permitted}")
@@ -115,7 +115,7 @@ def sample(script, output, *, components=None, data=None, simulator=None, checkp
 
 
 def evaluate(directory):
-    """Read-only evaluation for any registered development or training work order."""
+    """对任意已登记的开发或训练工单归档执行只读离线评价。"""
     r = _verified(directory)
     return {"schema": "b03.episode.evaluation.v1", "nodes": r["nodes"], "scene": r["scene"],
             "archiveSha256": r["verification"]["archiveIndexSha256"], "business": r["business"],
@@ -127,7 +127,7 @@ def evaluate(directory):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     subs = parser.add_subparsers(required=True, dest="command")
-    train = subs.add_parser("sample", help="Run an authorized training work order and return unweighted transitions")
+    train = subs.add_parser("sample", help="在获准训练脚本上采样单回合工单，并返回未加权状态转移轨迹")
     train.add_argument("--output", required=True)
     train.add_argument("--script", required=True, choices=sorted(TRAIN_SCRIPTS[PROFILE["nodes"]]))
     for option in ("components", "data", "simulator", "checkpoint", "tokenizer", "services"):
@@ -135,7 +135,7 @@ def main():
     train.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     for option in ("start", "end", "drain"):
         train.add_argument("--" + option, type=int)
-    score = subs.add_parser("evaluate", help="Verify a sealed run and return separate evaluation metrics")
+    score = subs.add_parser("evaluate", help="离线核验封存运行目录，并返回独立评价指标（含 U/W）")
     score.add_argument("directory")
     opts = vars(parser.parse_args())
     command = opts.pop("command")

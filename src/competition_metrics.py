@@ -1,4 +1,4 @@
-"""Competition metrics calculated after the episode from delivered evidence and device receipts."""
+"""回合结束后，依据已送达控制观测与设备回执离线计算赛题五项指标。"""
 from collections import defaultdict
 import json
 from math import isclose
@@ -8,7 +8,7 @@ from scenario_manifest import archive_input
 
 
 def records(path, *, optional=False):
-    # The native engine opens a device log on its first execution.
+    # 原生仿真引擎在首次实际执行设备指令时才创建设备执行日志。
     if optional and not path.exists():
         return
     with path.open(encoding="utf-8") as stream:
@@ -72,7 +72,7 @@ def event_windows(directory, conditions, start, end, stop):
         if start <= stamp < end:
             attrs = event["attrs"]
             if conditions.get("sceneOrigin") == "custom":
-                # The native reader accepts both spellings. Preserve older official receipt semantics.
+                # 原生读取器同时兼容两种带宽字段拼写，保留旧版官方回执语义。
                 qos = attrs.get("requirement", attrs)
                 if "bandwitdhBps" in qos and "bandwidthBps" not in qos:
                     qos = {**qos, "bandwidthBps": qos["bandwitdhBps"]}
@@ -115,7 +115,7 @@ def accept_report(windows, row, ttl, *, peer_evidence=False):
                     rec["samples"][node] = (sampled, arrival)
                 else:
                     rec["samples"].pop(node, None)
-                # RC requires fresh evidence from both ends of this link.
+                # RC 判定链路状态更新时，要求链路两端的新鲜探针均已送达。
                 peer = rec["samples"].get(link["peer_node_id"])
                 if match and peer and arrival - peer[0] <= ttl:
                     rec["evidenceArrivedNs"] = arrival
@@ -149,7 +149,7 @@ def sensed_events(windows, end):
                            "duringDrain": bool(arrived is not None and arrived >= end),
                            "status": status, "evidence": rec["samples"] if arrived is not None else {},
                            **({"neighborLink": rec["neighborLink"]} if "neighborLink" in rec else {})})
-    # JSON arrays in sealed receipts and in-memory values have the same representation.
+    # 封存回执中的 JSON 数组与内存值采用同一结构表示。
     return sorted(json.loads(json.dumps(values)), key=lambda item: item["index"])
 
 
@@ -166,7 +166,7 @@ def competition_metrics(directory, summary):
     clock = summary["clock"]
     windows = event_windows(directory, cond, clock["start_ns"], clock["end_ns"], clock["drain_end_ns"])
     ttl = cond["simulation"]["control"]["observation_ttl_ns"]
-    # Receipts before peer_endpoint_v2 encoded effective link availability in endpoint_online.
+    # peer_endpoint_v2 之前的历史回执用 endpoint_online 表示链路综合可用性。
     peer_evidence = summary.get("control", {}).get("probe_semantics") == "peer_endpoint_v2"
     writes = {}
     for row in records(directory / "controller.jsonl"):

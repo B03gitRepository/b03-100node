@@ -1,4 +1,4 @@
-"""Recompute the selected channel edition and compare it with the packet engine's recorded state."""
+"""离线重算所选信道模型的折算结果，并与分组引擎实际记录的链路状态逐批比对。"""
 import json
 
 from .model import project_channel_inputs, validate_profile
@@ -7,7 +7,7 @@ from scenario_manifest import archive_input, parse_json_bytes
 
 
 def check_channel_derivation(run, conditions, files, selected):
-    """Rebuild the physical inputs using the archived edition and nominal scene."""
+    """根据归档的信道版本和原始标称场景，重新推导出有效物理输入。"""
     model_file = "channel-model.json"
     if model_file not in files:
         raise ValueError("Channel profile is missing from the sealed run")
@@ -33,7 +33,7 @@ def check_channel_derivation(run, conditions, files, selected):
 
 
 def check_channel_batches(run, conditions):
-    """Compare effective parameters with the link state that the packet engine logged after each batch."""
+    """将推导出的生效参数与分组引擎在每个事件批次后记录的链路状态逐项核对。"""
     from b03_formulas import seconds_to_ns
     topology = json.loads(archive_input(run, "topology", conditions, effective=True).read_bytes())
     events = json.loads(archive_input(run, "events", conditions, effective=True).read_bytes())
@@ -42,12 +42,12 @@ def check_channel_batches(run, conditions):
     state = {}
     for link in topology["links"]:
         values = {fields[k]: v for k, v in link["params"].items() if k in fields}
-        # At construction the engine converts initial seconds back to milliseconds.
+        # 仿真引擎构造时会把初始秒数重新换算回毫秒。
         for key in ("delay_ms", "jitter_ms"):
             values[key] = values[key] / 1000 * 1000
         state[link["linkId"]] = values
     end = seconds_to_ns(conditions["simulation"]["end_s"])
-    pending = {0: []}  # The native clock replays pre-window batches from zero even on a cold start.
+    pending = {0: []}  # 即使采用冷启动，原生时钟也会从 0 秒起回放开窗前的历史事件批次。
     for event in events:
         at = seconds_to_ns(event["time"])
         if event["eventType"] == "link_param_change" and at <= end:

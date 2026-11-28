@@ -1,4 +1,4 @@
-"""Run and inspect official or custom scenarios with the pinned packet simulator."""
+"""使用锁定的分组仿真引擎运行或离线核验官方场景及自建场景。"""
 from __future__ import annotations
 import argparse
 from contextlib import ExitStack
@@ -15,7 +15,7 @@ from scene import PROFILE, ROOT, has_bundled_data, prepare, sha256, simulator_ro
 
 
 def _network_source(args, parser):
-    """Opt into a custom pack; otherwise preserve the official profile and B03_DATA precedence."""
+    """显式选择自建场景包；否则默认沿用官方配置及 B03_DATA 环境变量优先级。"""
     from knowledge.network import resolve_external, resolve_network
     if args.script is not None and (args.network is not None or args.scenario is not None):
         parser.error("--script selects an official script and cannot be combined with --network or --scenario")
@@ -29,7 +29,7 @@ def _network_source(args, parser):
 
 
 def _select_scene(args, parser, engine):
-    """Resolve the input source. B03_DATA supplies the default for official runs."""
+    """解析实际输入路径；官方场景默认从 B03_DATA 读取。"""
     if args.scenario is not None:
         return args.scenario.resolve(strict=True).parent
     if args.script is None:
@@ -44,7 +44,7 @@ def _select_scene(args, parser, engine):
 
 
 def _run_options(args, parser, scenario, out):
-    """Apply command-line overrides to the defaults from the archived scenario."""
+    """将命令行覆盖参数合并到归档场景的默认运行设置中。"""
     source_info = {"scene": scenario.scenario_id, "script": args.script, "sourceHashes": scenario.source_hashes}
     window, selection = PROFILE, PROFILE["exampleServices"]
     if args.scenario is not None:
@@ -76,67 +76,67 @@ def _run_options(args, parser, scenario, out):
 def main(argv=None, *, on_policy_ready=None):
     parser = argparse.ArgumentParser(description=__doc__)
     actions = parser.add_subparsers(dest="command", required=True)
-    run = actions.add_parser("run", help="Run the native packet clock and B03 controls")
-    run.add_argument("--simulator", help="Read-only resnet_py release (default: B03_SIMULATOR or simulator/resnet_py)")
+    run = actions.add_parser("run", help="运行分组仿真时钟与 B03 工单控制闭环")
+    run.add_argument("--simulator", help="只读 resnet_py 仿真引擎目录（默认优先取 B03_SIMULATOR，否则用仓内 simulator/resnet_py）")
     source = run.add_mutually_exclusive_group()
-    source.add_argument("--data", type=Path, help="Official dataset archive, extracted root or scenario folder")
-    source.add_argument("--scenario", type=Path, metavar="MANIFEST", help="Custom scenario manifest")
-    source.add_argument("--network", metavar="ID", help="Select a named synthetic network from knowledge/scenarios")
+    source.add_argument("--data", type=Path, help="官方数据集压缩包、解压根目录或具体场景目录")
+    source.add_argument("--scenario", type=Path, metavar="MANIFEST", help="自建场景清单文件（network.json / manifest.json）")
+    source.add_argument("--network", metavar="ID", help="选用 knowledge/scenarios 下的内置合成网络名称")
     run.add_argument("--foundation", action="store_true",
-                     help="Archive and share the static opening map for an official run (included for custom scenes)")
+                     help="为官方运行归档并向 OM/RC/模型共享 0 秒开局静态底图（自建场景默认自动启用）")
     channel = run.add_mutually_exclusive_group()
-    channel.add_argument("--channel-profile", metavar="ID", help="Override a custom manifest's channel edition")
-    channel.add_argument("--no-channel", action="store_true", help="Use a custom scene's nominal link settings")
-    run.add_argument("--script", help=f"Official script number (default: {PROFILE['script']})")
+    channel.add_argument("--channel-profile", metavar="ID", help="覆盖自建场景清单中声明的信道噪声版本")
+    channel.add_argument("--no-channel", action="store_true", help="禁用信道噪声折算，直接使用自建场景标称链路参数")
+    run.add_argument("--script", help=f"官方事件脚本编号（默认：{PROFILE['script']}）")
     run.add_argument("--mode", choices=["package", "single", "workorder"], default="workorder")
     run.add_argument("--initial-admission", choices=["residual","audit","original"], default="residual",
-                     help="At the first admitted work order, check authorized omissions on residual links")
+                     help="在首张准入工单触发时，检查是否有已授权但漏接的业务可在剩余链路补接")
     run.add_argument("--policy", default="I",
-                     help="Authorized RC tool, conditional D/K/J rule, or frozen checkpoint")
+                     help="指定 RC 决策方式：固定工具符号（如 I/B）、条件规则，或 model（模型策略）")
     run.add_argument("--checkpoint",type=Path,default=os.environ.get("B03_CHECKPOINT"))
     run.add_argument("--tokenizer",type=Path,default=os.environ.get("B03_TOKENIZER"))
     run.add_argument("--device",choices=["cpu","cuda"],default="cuda")
-    run.add_argument("--services", help="Comma-separated active workload, or all; defaults to the selected scenario")
+    run.add_argument("--services", help="逗号分隔的开局业务名单，或填 all；默认按所选场景配置")
     run.add_argument("--include-arrivals", action="store_true",
-                     help="Keep the selected startup workload and include all later registrations on delivery")
-    run.add_argument("--writable-services", help="Subset that can receive writes")
+                     help="保留所选开局业务，并将后续经上报送达的新注册业务一并纳入负载")
+    run.add_argument("--writable-services", help="允许执行设备配置写入的业务子集（逗号分隔）")
     run.add_argument("--protected-services", default="")
     run.add_argument("--service-end", action="append", default=[], metavar="ID=SECONDS",
-                     help="Schedule a project test demand end at an absolute second; repeat for separate services")
+                     help="在指定绝对秒数安排测试业务结束（格式 ID=秒数，可多次指定）")
     run.add_argument("--start", type=int)
     run.add_argument("--end", type=int)
     run.add_argument("--drain", type=int)
     run.add_argument("--defer-unreachable-cleanup", action=argparse.BooleanOptionalAction, default=None,
-                     help="Park unreachable work in workorder mode (default). Use --no-defer-unreachable-cleanup for v1.")
-    run.add_argument("--drop-install-ack", action="store_true", help="Test one lost native install receipt")
+                     help="工单模式下默认启用第 2 版失联挂起清理（v2）；加 --no-defer-unreachable-cleanup 可切回 v1")
+    run.add_argument("--drop-install-ack", action="store_true", help="测试开关：模拟丢失一次原生安装回执")
     run.add_argument("--output", type=Path, required=True)
-    check = actions.add_parser("verify", help="Validate causal evidence, native device writes, QoS, and packet accounts")
+    check = actions.add_parser("verify", help="离线核验因果观测证据、原生设备写入、五项 QoS 与分组守恒账目")
     check.add_argument("directory", type=Path)
     check.add_argument("--require-complete-drain", action="store_true",
-                       help="Fail acceptance when work-order drain closure is incomplete or unrecorded")
-    check.add_argument("--report", type=Path, help="New file for complete per-service verification results")
-    run.add_argument("--components", type=Path, help="Component manifest (default: config/components.json)")
-    run.add_argument("--record-component-io", action="store_true", help="Save exact solver input and output for local reproduction")
-    lookup = actions.add_parser("knowledge", help="Read a versioned technical knowledge entry")
+                       help="开启排空完结硬门禁：若排空截止时仍有未结工单或未记录排空状态，则验收失败（返回非零）")
+    check.add_argument("--report", type=Path, help="将完整的逐业务核验报告输出到指定新文件")
+    run.add_argument("--components", type=Path, help="组件注册清单路径（默认：config/components.json）")
+    run.add_argument("--record-component-io", action="store_true", help="保存求解器精确输入输出记录，便于本地复现与样例导出")
+    lookup = actions.add_parser("knowledge", help="查询版本化技术知识条目、计算公式或信道模型参数")
     lookup.add_argument("--components", type=Path)
-    lookup.add_argument("--formulas", action="store_true", help="Query the versioned calculation edition")
-    lookup.add_argument("--edition", help="Required formula edition version if specified")
+    lookup.add_argument("--formulas", action="store_true", help="查询版本化核心计算公式知识库")
+    lookup.add_argument("--edition", help="指定查询的公式或信道版本号")
     selector = lookup.add_mutually_exclusive_group(required=True)
     selector.add_argument("--id", dest="identifier")
     selector.add_argument("--topic")
-    selector.add_argument("--channel-profile", metavar="ID", help="Read a channel edition and its configured capacity limits")
-    sample = actions.add_parser("examples", help="Export actual model, solver and knowledge examples from a sealed run")
+    selector.add_argument("--channel-profile", metavar="ID", help="查看指定信道模型版本及其折算容量上限")
+    sample = actions.add_parser("examples", help="从封存运行目录导出真实的模型、求解器与知识组件 I/O 样例")
     sample.add_argument("directory", type=Path)
     sample.add_argument("--components", type=Path)
-    sample.add_argument("--output", type=Path, help="Write the examples to a new local file")
-    check.add_argument("--components", type=Path, help="Manifest used by the original run for a strict check")
+    sample.add_argument("--output", type=Path, help="将导出的组件样例写入指定本地新文件")
+    check.add_argument("--components", type=Path, help="严格源码核验时指定原运行使用的组件清单")
     for command in (check, sample):
         command.add_argument("--strict-source", action="store_true",
-                             help="Also require the original implementation and active component dependencies")
-        command.add_argument("--checkpoint", type=Path, help="Original model weights for a strict source check")
-        command.add_argument("--tokenizer", type=Path, help="Original tokenizer for a strict source check")
+                             help="开启严格溯源核验：同步比对源码文件、引擎版本与活跃组件依赖")
+        command.add_argument("--checkpoint", type=Path, help="严格核验时指定原运行使用的模型权重路径")
+        command.add_argument("--tokenizer", type=Path, help="严格核验时指定原运行使用的分词器路径")
         command.add_argument("--simulator",
-                             help="Original packet simulator for a strict source check")
+                             help="严格核验时指定原运行使用的分组仿真器路径")
     args = parser.parse_args(argv)
     if not __debug__:
         parser.error("Run without -O so all invariant checks execute")
@@ -271,7 +271,7 @@ def main(argv=None, *, on_policy_ready=None):
         if not set(ids) <= startup_ids or not protected_ids <= set(ids):
             run.error("The selected and protected sets must contain only the named startup services")
         source_info["workloadSelection"] = {"schema": "b03.startup-plus-arrivals.v1", "startup": ids}
-        # Only the simulator receives the expanded traffic filter. Roles discover every ID from delivered reports.
+        # 仅仿真器收到展开后的流量过滤器；OM/RC 始终只能从已送达报告中发现业务编号。
         ids = sorted(set(ids) | (specs.keys() - startup_ids))
     if not ids or not set(ids) <= specs.keys():
         run.error("Unknown or empty original service selection")

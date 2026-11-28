@@ -1,8 +1,7 @@
-"""B03 joint work order over the delivered observations and native packet-device protocol.
+"""基于已送达观测与原生分组设备协议的 B03 联合工单执行主循环。
 
-Install on a newly initialised control-mode Simulation. The controller loop has no
-simulator or node handle. Only device-local query sampling needs access to local
-data-plane state. Work order accounting uses replies delivered by the original network.
+在 control 模式 Simulation 初始化后立即挂载；主控循环不直接持有仿真器或节点句柄，
+仅设备本地读回采样需要读取数据面状态，所有工单记账均严格依赖经真实网络送达的回执。
 """
 from __future__ import annotations
 
@@ -57,7 +56,7 @@ class WorkLoop(ControlLoop):
 
     def _log(self, row):
         if self.work and "plan_id" in row and "work_id" not in row:
-            # Native plans are numbered per service; all their wire IDs carry this joint work ID.
+            # 原生计划按业务分别编号，其所有线上指令均携带本次联合工单的 work_id。
             row = dict(row, work_id=self.work["work_id"], plan_id=self.native_plan_id)
         self.native_log(row)
         if (self.defer_unreachable_cleanup and row["event"] == "command_timeout" and row.get("operation") == "query"
@@ -91,11 +90,11 @@ class WorkLoop(ControlLoop):
         links, demands = self.link_reports.snapshot(now), self.service_reports.snapshot(now)
         for node, version in links["node_versions"].items():
             self.versions[node] = max(self.versions.get(node, 0), version)
-        # Keep the native fresh-probe view intact. Some arrived ACKs are newer than its last probe.
+        # 保持原生新鲜探针视图不变；部分刚到达的 ACK 版本可能比最后一次探针更新。
         links["controller_known_node_versions"] = dict(self.versions)
         if self.deferred_cleanups:
-            # A parked write is expired. Other services use distinct epoch keys and
-            # the shared version guard. The parked path continues to consume wire budget.
+            # 挂起写指令已过期失效；其他业务使用各自的代际键并共用节点版本号保护，
+            # 被挂起的旧路径仍持续占用链路预留线速。
             held = [item["transaction"] for item in self.deferred_cleanups.values()]
             links["controller_pending_cleanups"] = sorted(
                 tr["decision"]["service_id"] for tr in held if tr["source_confirmed"])
@@ -150,8 +149,8 @@ class WorkLoop(ControlLoop):
                 release.append(sid)
             if choice["accepted"]:
                 deploy.append(sid)
-        # RC can diagnose a service without authorizing any change. Explicit execution
-        # lists take precedence over deriving a change from that descriptive decision.
+        # RC 可以仅做诊断而不授权任何变更；因此下发时以显式执行列表为准，
+        # 优先于从描述性决策字段推导配置变更。
         for key, inferred in (("release_ids", release), ("install_ids", deploy)):
             ids = plan.get(key, inferred)
             if not isinstance(ids, (tuple, list)) or len(ids) != len(set(ids)) or not set(ids) <= set(allowed):
@@ -211,7 +210,7 @@ class WorkLoop(ControlLoop):
         }
 
     def _configuration_key(self, links, demands, now):
-        """Only freshness/continuity of received evidence enters the trigger, never a periodic sequence or clock."""
+        """仅将已收配置证据的新鲜度与连续性纳入触发键，绝不把周期序号或时钟当作规划触发条件。"""
         ttl = self.config["observation_ttl_ns"]
         probes = {}
         for link in links["links"].values():
@@ -243,9 +242,9 @@ class WorkLoop(ControlLoop):
         return result
 
     def _gate(self, links, demands, now):
-        # Compare decision semantics at every native control tick. Sequence numbers,
-        # periodic sample clocks and individual FIFO samples do not trigger planning.
-        # The cache changes queue_pressure only on a sustained threshold crossing.
+        # 在每个原生控制节拍上仅比较决策语义：探针序号、周期采样时钟及单次队列瞬时值
+        # 均不触发重新规划；只有观测缓存跨越持续拥堵滞回阈值时才改变 queue_pressure。
+        # （避免高频瞬时抖动导致无效开单。）
         physical = ("capacity_bps", "delay_ns", "jitter_ns", "ber", "packet_loss_rate")
         link_key = {}
         for lid, row in links["links"].items():
@@ -333,8 +332,8 @@ class WorkLoop(ControlLoop):
         }
 
     def _defer_expired_cleanup(self, now):
-        # Park a release only after the original write expired AND its read-only
-        # reconciliation timed out. No deadline is treated as a successful stop.
+        # 仅当原释放写指令已过期且随后的只读对账查询也超时后，才允许挂起该释放任务；
+        # 任何超时都不会被误当成停源或清理成功。
         tr = self.transaction
         if not tr or self.pending or self.readout or tr["status"] != "unknown":
             return
@@ -353,22 +352,22 @@ class WorkLoop(ControlLoop):
         wid, node = work["work_id"], original["target_node_id"]
         offline_probe = None
         if now < tr["deadline_ns"]:
-            # Silence alone waits the configured transaction timeout. A fresh,
-            # explicit peer-down sample can shorten it after the write expired
-            # and an actual read-only reconciliation also timed out.
+            # 若仅仅是静默无回音，则等待完整事务超时；若原写指令已过期、只读对账也超时，
+            # 且收到新鲜明确的邻居离线证人探针，则可提前触发挂起，避免长阻塞后续工单。
+            # （提前挂起同样完整保留原链路预留，绝不提前释放带宽。）
             delivered = self.link_reports.snapshot(now)
             offline_probe = self._port_witness(node, original["issued_at_ns"], delivered, now, online=False)
             if offline_probe is None:
                 return
         links = list(tr["decision"]["link_path"])
-        del tr["cleanup_query_timeout"]  # A resumed attempt must earn a new timeout of its own.
-        # In an asymmetric outage neighbors may keep reporting this port as up,
-        # even though replies cannot return. Leave a planning window between failed recoveries.
+        del tr["cleanup_query_timeout"]  # 重新唤醒后的恢复尝试必须独立走完自身的超时判定。
+        # 非对称中断场景下，邻居可能持续上报该端口在线但回包仍无法返回；
+        # 两次失败恢复之间留出规划冷却窗，防止死循环重试。
         retry_after = now + self.config["transaction_timeout_ns"] if tr.get("resumed_from_hold") else now
         self.deferred_cleanups[wid] = {"work": work, "transaction": tr, "plan_id": self.native_plan_id,
                                        "node": node, "since": now, "retry_after": retry_after, "links": links}
-        # A resumed release owns only its original step. Replan unstarted operations
-        # with current evidence, so stale instructions cannot execute a second time.
+        # 唤醒的挂起任务只负责补完自己原本那一步；同单尚未开始的其他操作交回下一轮
+        # 按最新观测重新规划，避免过期指令被二次下发。
         abandoned = list(work["queue"])
         for phase, other in abandoned:
             work["failures"].setdefault(other, "replan_after_unconfirmed_release")
@@ -397,7 +396,7 @@ class WorkLoop(ControlLoop):
         return False
 
     def _port_witness(self, node, since, links, now, *, online):
-        """Match a delivered post-attempt observation; a neighbor never proves a device write."""
+        """匹配尝试失败后新送达的端口观测；邻居探针只用于辅助判断可达性，不能替代设备写回执。"""
         ports = ((reporter, received["probe"], received["received_at_ns"])
                  for link in links["links"].values() for reporter, received in link["reporters"].items() if received)
         service_sample = -1
@@ -439,8 +438,8 @@ class WorkLoop(ControlLoop):
                 if self.work is not None:
                     self._advance_work(now)
                     return
-                # A previously negative readback keeps its old reservation. Independent
-                # actions can still proceed under the newly solved explicit write scope.
+                # 此前读回未确认的业务继续保留原预留；但其他独立业务仍可在新核权范围内正常执行。
+                # （隔离单业务读回异常，不连坐整网。）
                 if not (plan.get("release_ids") or plan.get("install_ids")):
                     return
             try:
@@ -610,9 +609,9 @@ class WorkLoop(ControlLoop):
                     or row["version"] < self.versions.get(node, 0)
                     for sid in active_targets for node, row in work["receipts"][sid]["install"]["nodes"].items())
         if stale and not work["joint_rechecked"]:
-            # Earlier services may have finished many seconds before the last one. Obtain
-            # a common fresh window for the final OM check. Old release samples document the
-            # earlier release barrier, even if the same source is now active on its new epoch.
+            # 较早完成的业务可能比最后一项早结束很多秒，需在整单 OM 终审前补齐统一新鲜窗口。
+            # 旧释放读回用于证明早先的释放栅栏已经成立，即使同一源端随后又在新代际上重新激活。
+            # （确保整单签收与历史代际退场证据均完整可溯。）
             self._start_readout(now, "install", final_targets=active_targets)
             return
         operations = {key: deepcopy(work[key]) for key in ("release_ids", "install_ids", "completed", "failures")}
@@ -667,7 +666,7 @@ class WorkLoop(ControlLoop):
         super()._abort(now, reason)
 
     def _activated(self, now, reconciled=False):
-        # Activation ACK is a possible write effect. Keep the in-flight reservation intact.
+        # activate 的 ACK 可能意味着源端已实际生效，须继续保留在途链路预留。
         self._log({"event": "transaction", "time_ns": now, "plan_id": self.native_plan_id,
                    "phase": "source_write_ack", "status": "awaiting_path_readback", "reconciled_by_query": reconciled})
         self._start_readout(now, "install")
@@ -706,7 +705,7 @@ class WorkLoop(ControlLoop):
             targets = final_targets
         self.readout = {"work_id": self.work["work_id"], "phase": phase, "waiting": {}, "received": {}, "targets": targets,
                         "joint_refresh": final_targets is not None, "started_at_ns": now}
-        # All requested devices, including source and terminal, reply independently in-band.
+        # 路径上全部待核查设备（含源端与终端）均通过带内控制网络独立回传读回。
         for sid, target in targets.items():
             nodes = target["decision"]["node_path"]
             self._event("readback_requested", now, phase=phase, plan_id=target["plan_id"], epoch=target["epoch"],
@@ -770,7 +769,7 @@ class WorkLoop(ControlLoop):
         batch = self.readout
         if not self._accept_readout(batch, ack, now, node) or batch["waiting"]:
             return
-        # Do not join an early, expired sample with a later reply and call it fresh.
+        # 禁止把早已过期的早期样本与后到的回复拼在一起冒充新鲜读回。
         self._snapshots(now)
         stale = [key for key, row in batch["received"].items()
                  if now - row["observed_at_ns"] > self.config["observation_ttl_ns"]
@@ -889,7 +888,7 @@ class WorkLoop(ControlLoop):
             if phase == "install":
                 work["failures"].setdefault(sid, reason)
             if source and source["active_epoch"] == epoch and source["enabled"]:
-                # Never remove intermediate forwarding while the affected source may still be transmitting.
+                # 在受影响的源端尚未确认停发前，严禁先拆除中间节点的转发规则。
                 tr["rollback"] = phase != "release"
                 tr["old"] = tr.get("old") or {"epoch": epoch, "decision": choice}
                 tr["status"] = "stopping"
@@ -1009,7 +1008,7 @@ class WorkLoop(ControlLoop):
 
 
 def install(sim, roles, emit, *, defer_unreachable_cleanup=True):
-    """Bind the work order through delivered caches and the single packet command channel."""
+    """通过已送达观测缓存与唯一分组指令通道，将工单执行循环挂载到仿真器。"""
     if hasattr(sim, "connect_work_order"):
         return sim.connect_work_order(roles, emit, defer_unreachable_cleanup=defer_unreachable_cleanup)
     from resnet_bridge import bind_work_loop

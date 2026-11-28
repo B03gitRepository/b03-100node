@@ -1,4 +1,4 @@
-"""Two-tool policy over a startup catalogue and a delivered work-order observation."""
+"""基于开局静态底图与已送达工单差量的 B/I 双工具策略选择器。"""
 from __future__ import annotations
 
 from copy import deepcopy
@@ -29,6 +29,7 @@ def rows(table):
         )], strict=True))
 
 
+# 将开局静态底图与每单已送达差量编码为 8 维归一化特征向量，供 B/I 策略选择器打分。
 class FoundationFeatures:
     def __init__(self, catalog):
         self.digest = evidence_digest(catalog)
@@ -83,18 +84,20 @@ def write_parameters(directory, parameters):
         out.write("\n")
 
 
+# 根据线性权重与 8 维特征计算当前合法工具集合上的选择概率分布。
 def probabilities(weights, features, legal):
     if not legal or not set(legal) <= set(SYMBOLS):
         raise ValueError("Unexpected legal tool set")
     if len(legal) == 1:
         return {legal[0]: 1.0}
     z = math.fsum(w*x for w,x in zip(weights, features, strict=True))
-    # Log-sum-exp for a binary policy; avoids overflow in both tails.
+    # 二分类逻辑回归采用数值稳定的 log-sum-exp 写法，避免正负尾端指数溢出。
     denom = math.exp(-abs(z))
     p = (1 / (1 + denom)) if z >= 0 else (denom / (1 + denom))
     return {"B": p, "I": (denom / (1 + denom)) if z >= 0 else (1 / (1 + denom))}
 
 
+# 底图感知的双工具策略适配器，支持在线采样（online-ppo）与确定性贪婪推理及检查点恢复。
 class FoundationActor:
     symbols = list(SYMBOLS)
 

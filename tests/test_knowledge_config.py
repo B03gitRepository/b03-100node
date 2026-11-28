@@ -1,4 +1,4 @@
-"""Configuration and read-only knowledge regressions."""
+"""知识版配置解析与只读检索契约的回归测试。"""
 import json
 from pathlib import Path
 import sys

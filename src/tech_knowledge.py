@@ -1,4 +1,4 @@
-"""Read-only lookups against a pinned technical edition and their use at RC opening."""
+"""针对锁定技术知识版的只读查询实现，以及 RC 首单残余准入核查逻辑。"""
 from copy import deepcopy
 import hashlib
 import json
@@ -21,8 +21,8 @@ def _entries(library, edition):
             raise ValueError("Incomplete or duplicate knowledge entry")
         keys = fields
         if library["schema"] == "b03.knowledge.v2":
-            # Plain technical notes keep their published shape. Diagnostic notes and cases
-            # also publish the evidence needed and the limits of the conclusion.
+            # 普通技术说明保持既有发布格式；诊断指引与历史案例条目
+            # 额外标明所需证据依据以及结论的适用边界。
             if "kind" in row:
                 keys = (*fields, "kind", "evidence", "limits")
                 if (row["kind"] not in ("diagnosis", "case") or not _text(row.get("limits"))
@@ -136,7 +136,7 @@ def opening_lookup(components, work, snapshot_id, state, diagnosis, mode, select
 
 
 def check_opening_advice(receipt, before, after, snapshot, authority, admission):
-    """Use a matching K044 note to check the residual supplement against the original work order."""
+    """命中 K044 知识条目时，对照原始工单复核残余容量补接提案的合规性。"""
     if not receipt["output"]:
         return {"status": "entry_not_in_edition"}
     if set(before) != set(after):
@@ -160,7 +160,7 @@ def check_opening_advice(receipt, before, after, snapshot, authority, admission)
 
 
 def opening_outcome(receipt, admission, choices, installs):
-    """Relate the advice to the original solver, residual search and final device plan."""
+    """汇总 K044 建议与原求解器提案、残余搜索及最终设备计划的对应审计结果。"""
     searched = {row["id"] for row in admission["search"]}
     by_service = {}
     for sid in receipt["input"]["pendingAuthorized"]:
@@ -175,6 +175,6 @@ def opening_outcome(receipt, admission, choices, installs):
 
 
 def verify_work_order_queries(conditions, events):
-    """Compatibility entry point for callers using the original src-only module."""
+    """兼容仅导入 src/ 原模块的旧调用方，转发工单知识回放核验入口。"""
     from knowledge_ports import verify_work_order_queries as replay
     return replay(conditions, events)

@@ -1,4 +1,4 @@
-"""Newcomer API regressions for authorization, exact U accounting and receipt versions."""
+"""验证统一回合采样评价接口的授权边界、精确 U 核算与回执版本兼容。"""
 from pathlib import Path
 import sys
 import unittest

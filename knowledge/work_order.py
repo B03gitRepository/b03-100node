@@ -1,4 +1,4 @@
-"""Optional work-order contexts sourced from a pinned, read-only knowledge edition."""
+"""从锁定的只读知识版中按配置筛选并组装工单知识上下文。"""
 from copy import deepcopy
 import hashlib
 import json
@@ -31,7 +31,7 @@ def configured(reg):
 
 
 def check_binding_ids(bindings, entries):
-    """Exact references must exist even when their diagnostic event never occurs."""
+    """校验绑定配置中点名引用的条目编号，即使对应症状未触发也必须存在于知识版中。"""
     for port, binding in bindings.items():
         references = binding.get("topics", {})
         if "identifier" in binding:
@@ -43,7 +43,7 @@ def check_binding_ids(bindings, entries):
 
 
 def _bound_entries(components):
-    """Read and pin exact entries without running the configured retrieval plugin."""
+    """直接按编号读取并固定指定条目，不调用外部检索插件。"""
     entries = getattr(components, "_diagnostic_entries", None)
     if entries is None:
         raw = components.knowledge_path.read_bytes()
@@ -61,7 +61,7 @@ def validate_binding_edition(components):
 
 
 def diagnosis_query(binding, diagnosis, state):
-    """Group only configured findings by service, using this work order's evidence."""
+    """基于本张工单的诊断证据，仅按已配置的症状标签汇总受影响业务并生成查询。"""
     matches = {}
     for sid, row in diagnosis["services"].items():
         tags = {row["status"], row.get("potential_action_status")}
@@ -75,7 +75,7 @@ def diagnosis_query(binding, diagnosis, state):
 
 
 def diagnosis_ids(binding, question):
-    # Resolve each ID once even if several services or phenomena use the same guidance.
+    # 即使多个业务或症状命中同一条指引，每个条目编号也只解析并附带一次。
     return list(dict.fromkeys(key for tag in sorted(question["matches"]) for key in binding["topics"][tag]))
 
 
@@ -110,7 +110,7 @@ def lookup(components, port, work, snap, stamp, *, diagnosis=None, state=None, o
 
 
 def check_om_advice(components, work, snap, state, diagnosis, receipt):
-    """RC independently checks a dynamic OM handoff before any consumer can use it."""
+    """RC 在任何下游消费之前，独立复核 OM 动态打包传来的知识建议。"""
     binding = components.knowledge.get("bindings", {}).get("om") if components else None
     if binding is None:
         if receipt is not None:
@@ -142,7 +142,7 @@ def check_om_advice(components, work, snap, state, diagnosis, receipt):
         topic = binding["topic"].casefold()
         expected = [key for key, row in entries.items() if any(topic in t.casefold() for t in row["topics"])]
     else:
-        # Legacy topic plugins own their recall/rank. Their returned rows must still match the edition.
+        # 旧版主题插件自行负责召回与排序，但返回条目仍须与锁定知识版一致。
         return
     if ids != expected:
         raise ValueError("OM knowledge differs from the results for this work order")

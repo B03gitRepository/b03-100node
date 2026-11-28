@@ -1,4 +1,4 @@
-"""Controller checks for replaceable packet rules. Components produce proposals from detached data."""
+"""可替换规则求解器的主控封装与校验层；外部组件仅基于深拷贝数据产出配置提案。"""
 from copy import deepcopy
 from time import perf_counter_ns
 
@@ -16,7 +16,7 @@ BUDGET_LIMITS = deepcopy(strong_tools.BUDGETS)
 
 
 def custom_catalog(native, registrations):
-    """Apply administrator-declared methods and budgets only when their scope template is legal."""
+    """仅当对应作用域模板合法时，才生效管理员在配置中声明的自定义方法与搜索预算。"""
     by_id = {row["id"]: row for row in native}
     offered = []
     for symbol, reg in registrations.items():
@@ -28,13 +28,13 @@ def custom_catalog(native, registrations):
 
 
 def binding(action, bound):
-    """Commit an external return to this work order, snapshot, authority, action and budgets."""
+    """将外部规则返回的提案绑定到当前工单、快照、权限、选中动作与预算约束。"""
     return {**bound["identity"], "configSha256": strong_tools.digest(bound["config"]),
             "actionSha256": strong_tools.digest(action)}
 
 
 def bind_proposal(action, bound, target, audit):
-    """Finish a proposal with controller-verifiable identities, without changing the target."""
+    """在不改动目标路径的前提下，为提案补齐主控可核验的身份绑定字段。"""
     return target, {**audit, "binding": binding(action, bound), "targetHash": strong_tools.digest(target)}
 
 
@@ -64,7 +64,7 @@ def begin_sample(chooser, action, catalog, bound, context):
 
 
 class CheckedRules:
-    """One local plugin and private solver context per chooser."""
+    """为每个决策实例隔离维护一份本地规则插件及其私有求解上下文。"""
     def __init__(self, implementation, spec, symbols, context=None):
         if not all(callable(getattr(implementation, name, None)) for name in ("enumerate_actions", "solve_action")):
             raise ValueError("Rules must implement enumerate_actions and solve_action")
@@ -144,7 +144,7 @@ class CheckedRules:
             selected.append(row["id"])
         if len(set(selected)) != len(selected):
             raise ValueError("Duplicate rule catalog symbol")
-        # Return clean controller-owned rows in registered order.
+        # 按组件注册顺序返回干净的、由主控持有所有权的动作行列表。
         offered = set(selected)
         if self.custom:
             offered.update(NATIVE_IDS & legal.keys())
@@ -159,7 +159,7 @@ class CheckedRules:
         return target, raw, checked
 
     def propose(self, action, offered, bound, timing):
-        """Return detached context for the controller to commit after its final plan guards."""
+        """返回隔离的待提交上下文，待主控通过全部终审关口后再正式生效。"""
         before = perf_counter_ns()
         snapshot, authority, config = bound["snapshot"], bound["authority"], bound["config"]
         ident = bound["identity"]
@@ -258,7 +258,7 @@ def _check_budget(action, audit, config, *, custom=False):
                 raise ValueError("Reported path search exceeded " + limit)
 
 def verify_patch_receipt(conditions, registered, plan, diagnosis, evidence, rec, knowledge):
-    """Check a sealed patch and its common guards without loading the applicant's code."""
+    """无需加载外部求解器代码，直接核验封存补丁及通用约束条件。"""
     from rule_patch import V2, limits, materialize
     if not isinstance(rec, dict) or set(rec) != {"schema","input","output","hostConfig","wallNs"} or rec["schema"] != V2:
         raise ValueError("Invalid v2 rule receipt")

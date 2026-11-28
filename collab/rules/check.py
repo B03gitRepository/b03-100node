@@ -1,4 +1,4 @@
-"""Exercise a rule provider using only Python's standard library and the synthetic case."""
+"""使用合成用例离线自测规则求解器组件（仅依赖 Python 标准库）。"""
 import argparse
 from copy import deepcopy
 import importlib.util
@@ -22,6 +22,7 @@ def load(path, factory):
     return getattr(module, factory)
 
 
+# 校验规则补丁合规性：不越权、不超变更与跳数预算、路径连通、满足原始五项 QoS 且不超链路容量。
 def check(msg, reply):
     if not isinstance(reply, dict) or not {"patch"} <= reply.keys() <= {"patch","audit"}:
         raise ValueError("Expected a patch and optional audit")
@@ -66,7 +67,7 @@ def check(msg, reply):
 
 
 def export_kit(directory):
-    """Copy the minimal, self-contained standard-library runner into a new directory."""
+    """将最小可独立运行的标准库自测工具包导出到新目录。"""
     root = HERE.parents[1]
     members = ("collab/rules/check.py", "collab/rules/case.json", "src/collab_patch_rule.py",
                formula.IMPLEMENTATION, formula.DECLARATION)
@@ -82,9 +83,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--provider", type=Path,default=DEFAULT)
     ap.add_argument("--factory",default="build_rules")
-    ap.add_argument("--registration", type=Path, help="Resolved rule registration JSON for a different provider")
+    ap.add_argument("--registration", type=Path, help="自定义规则提供方的已解析注册配置 JSON 路径")
     ap.add_argument("--case",type=Path,default=HERE/"case.json")
-    ap.add_argument("--export-kit", type=Path, help="Export the standalone kit into a new directory")
+    ap.add_argument("--export-kit", type=Path, help="将独立自测工具包导出到指定新目录")
     opts = ap.parse_args()
     if opts.export_kit is not None:
         print(json.dumps({"files": export_kit(opts.export_kit)}))

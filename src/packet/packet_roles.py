@@ -1,4 +1,4 @@
-"""B03 rules for the new packet simulator. All inputs are delivered controller caches."""
+"""新版分组仿真器的 OM/RC 角色逻辑实现；所有决策输入均来自已送达控制器缓存。"""
 from __future__ import annotations
 
 from collections import Counter
@@ -97,7 +97,7 @@ def _project_links(now_ns, snapshot):
         elif any(v["status"] == "stale" for v in reports.values()):
             link["reason"] = "stale_endpoint_observation"
         else:
-            # Preserve native availability and timing; derive QoS from the two delivered probes.
+            # 保留原生可用性与时间戳，同时由链路两端已送达探针综合推导 QoS 参数。
             link.update({k: row[k] for k in ("usable", "reason", "observed_at_ns") if k in row})
             if "capacity_bps" in row:
                 link.update(formula.fuse_endpoints(reports[a], reports[b]))
@@ -227,7 +227,7 @@ def _choice(service, path, raw_links, *, revision=None, reason="no_feasible_b03_
 
 def single_policy(snapshot, services, *, now_ns, payload_bytes=formula.PAYLOAD_BYTES, epoch_overhead_bytes=formula.EPOCH_BYTES,
                   control_headroom_fraction=formula.DEFAULT_HEADROOM, retained_wire_bps=None):
-    """Native DecisionPolicy, using the original B03 priority_greedy implementation."""
+    """原生单步决策策略：沿用原始 B03 优先级贪心（priority_greedy）实现。"""
     options = _packet_options(payload_bytes, epoch_overhead_bytes, control_headroom_fraction)
     raw = _project_links(now_ns, snapshot)
     retained = dict(retained_wire_bps or {})
@@ -260,22 +260,22 @@ def _superseded(demand, ack):
 
 
 def _model(state, headroom, permitted):
-    # Model costs and assignments use wire bps. Confirmed rows with unknown demand,
-    # old epochs, and uncertain preparations keep consuming the unmodelled balance.
+    # 求解代价与分配均按线路速率（wire bps）计算；需求不明的已确认业务、旧代际
+    # 以及状态未决的预配路径都继续扣除未建模余量，绝不超卖带宽。
     raw, acks = state["links"], state["confirmed"]
     demands = {sid: row for sid, row in state["services"].items() if row["fresh"]}
     requests = {sid: dict(_request(row["service"]), _deleted=not (row["active"] and row["registered"]))
                 for sid, row in demands.items()}
     superseded = {sid for sid, row in demands.items() if _superseded(row, acks.get(sid))}
     uncertain = {sid for sid, record in acks.items() if not record["configuration_evidence"]["verified"]}
-    # The native source withdraws its permit on every demand revision. An older
-    # epoch is still on the wire ledger until the device confirms its retirement.
+    # 业务每次需求修订时，原生源端都会收回旧发送许可；但在设备确认退场前，
+    # 旧代际路径仍继续保留在链路预留账本中。
     current = {sid: _assignment(acks[sid]["decision"]) if sid in acks and sid not in superseded and sid not in uncertain else None
                for sid in requests}
     modeled_load = loads(raw, current)
     expiring = sorted(sid for sid in (permitted & acks.keys()) - uncertain
                       if sid in requests and requests[sid]["_deleted"])
-    # Release-only orders cannot offer the old wire of a deferred active revision.
+    # 纯释放工单不能把挂起中活跃修订的旧预留提前释放给新接入使用。
     reusable = set() if expiring else (superseded & permitted) - uncertain
     conditional = loads(raw, {sid: _assignment(acks[sid]["decision"]) for sid in reusable})
     confirmed_load = Counter()
@@ -375,12 +375,12 @@ def _diagnose(state, snapshot, ledger, config, allowed, protected, network_facts
             rows[sid]["authorized"] = False
         lifecycle["lifecycle_release"] = {"owner": "controller", "release_ids": expiring,
                                           "deferred_active_ids": deferred, "deferred_refresh_ids": refresh}
-        # These fresh, verified old epochs can retire now. Other maintenance
-        # and active work acquire their own authority on the next snapshot.
+        # 这些已获新鲜读回验证的旧代际现在可以安全退场；其他维护与活跃任务
+        # 将在下一张观测快照中各自获取独立授权。
         authorized, refresh = expiring, []
     elif allow_source_stop and (stop := choose_source_stop(state, allowed - protected, healthy)):
-        # An online source can acknowledge its own stop even when an offline
-        # destination cannot confirm cleanup. No install can spend this reservation.
+        # 即使目的端离线导致无法确认全跳清理，在线源端仍可先确认停发；
+        # 但任何新安装都不得挪用该业务尚未清理完毕的链路预留。
         sid = stop["service_id"]
         for item in rows.values():
             item["authorized"] = False
@@ -408,7 +408,7 @@ def _bound(work_id, state, config, diagnosis, snapshot, policy_hash):
 
 
 def _conditional_reservations(state, authority):
-    """Superseded verified device epochs that the raw solver snapshot offers conditionally."""
+    """整理已被新版需求取代、但设备已确认的旧代际（epoch）预留，供求解器按条件复用。"""
     result = {}
     for sid in authority["executableServiceIds"]:
         ack = state["confirmed"].get(sid)
@@ -422,9 +422,9 @@ def _device_plan(bound, state, target, ledger, audit):
     writable = set(bound["authority"]["executableServiceIds"])
     proposal = audit.get("rulePatch")
     if proposal:
-        # Absence in a patch keeps the installed epoch, even when the logical snapshot
-        # represents a newly revised demand as unassigned. A rejected install cannot
-        # implicitly become a withdrawal of an otherwise untouched prior epoch.
+        # 补丁中未提及的业务保持现有已安装代际不变，即便逻辑快照把新修订显示为未分配；
+        # 一次被拒绝的安装绝不能隐式撤销原本完好的旧代际配置。
+        # （保证未受影响业务的转发连续性。）
         intended = set(proposal["output"]["patch"]) | set(audit.get("openingAdmission", {}).get("applied", []))
         writable &= intended - set(audit.get("strictPacketQosRejected", []))
     before, desired = {}, {}
@@ -477,7 +477,7 @@ def _resource(work_id, state, model, ledger, config, diagnosis, policy_hash, cho
     if "networkBaseline" in diagnosis:
         component_meta["rc_network_baseline_digest"] = digest(diagnosis["networkBaseline"])
     if "knowledgeContext" in diagnosis:
-        # Record exactly what the RC decision function received, including empty matches.
+        # 如实记录 RC 决策函数实际收到的知识上下文（包括空命中情况）。
         component_meta["rc_knowledge_input_ids"] = [entry["id"] for entry in diagnosis["knowledgeContext"]]
     rules = None
     rule_context = None
@@ -523,7 +523,7 @@ def _resource(work_id, state, model, ledger, config, diagnosis, policy_hash, cho
         catalog = (enumerate_actions(model, b["authority"], config) if rules is None
                    else rules.catalog(b, timing))
         offered = tuple(a["id"] for a in catalog) if rules is not None else ()
-        # RC verified the whole OM handoff. Each decision port receives only its own registered inputs.
+        # RC 已对整份 OM 交接完成复核；各下游决策端口只接收自己显式登记的输入。
         decision_diagnosis = diagnosis
         if "knowledgeContext" in diagnosis or "networkBaseline" in diagnosis:
             decision_diagnosis = dict(diagnosis)
@@ -602,7 +602,7 @@ def _resource(work_id, state, model, ledger, config, diagnosis, policy_hash, cho
             reason = "destination_offline_source_stop"
         choices[sid] = _choice(row["service"], target[sid], state["links"],
                                revision=row["revision"], reason=reason)
-        # Guard the packet contract's strict threshold comparison as well as B03's EPS.
+        # 同时守住分组契约的严格阈值边界和 B03 求解器的浮点容差（EPS）。
         if target[sid] is not None and not choices[sid]["accepted"] and target[sid] != model["assignments"][sid]:
             rejected.append(sid)
             target[sid] = None
@@ -627,7 +627,7 @@ def _resource(work_id, state, model, ledger, config, diagnosis, policy_hash, cho
     decision = elapsed + selection["selectionWallNs"]
     if contexts:
         component_meta["knowledge_contexts"] = contexts
-        # RC lookup precedes solver timing. The external rule clock below already includes it.
+        # RC 知识查询先于求解器耗时统计；下方外部规则计时已自动包含查询开销。
         if rules is None:
             decision += sum(rec["wallNs"] for port,rec in contexts.items() if port != "om")
     if rules is not None:
@@ -641,7 +641,7 @@ def _resource(work_id, state, model, ledger, config, diagnosis, policy_hash, cho
     elif lifecycle or source_stop:
         decision = time.perf_counter_ns() - rc_start
     if om_advice is not None:
-        # The OM port runs before RC starts its clock.
+        # OM 端口查询在 RC 启动决策计时前执行完毕。
         decision += om_advice["wallNs"]
         if rules is not None:
             timing["chargedComponentWallNs"] += om_advice["wallNs"]
@@ -700,7 +700,7 @@ def _check_local_rule(phase, choice, epoch, node, result):
 
 
 def _configuration_evidence(choice, epoch, samples, demand, probes, floors, now, ttl):
-    """Bind every installed hop to an arrived query and a time or version witness."""
+    """将每条已安装路径的每一跳绑定到已送达的设备查询及其时间/版本证据。"""
     path = choice["node_path"]
     demand_fresh = demand is not None and demand["fresh"]
     active_epoch = bool(demand_fresh and demand["registered"] and demand["active"]
@@ -735,8 +735,8 @@ def _configuration_evidence(choice, epoch, samples, demand, probes, floors, now,
             if active_epoch:
                 matches = _check_local_rule("install", choice, epoch, nid, state)
             elif revoked_epoch:
-                # Demand callbacks revoke the source permit without bumping node version.
-                # A new source sample for this revision is therefore indispensable.
+                # 需求变更回调会撤销源端许可但不递增节点版本号，
+                # 因此必须取得对应需求修订的新源端读回样本。
                 matches = (rec["phase"] == "config_refresh" and isinstance(src, dict)
                            and src.get("enabled") is False and src.get("rate_bps") == 0
                            and src.get("active_epoch") == epoch == src.get("epoch")
@@ -751,7 +751,7 @@ def _configuration_evidence(choice, epoch, samples, demand, probes, floors, now,
         elif src is not None:
             node["status"] = "readback_mismatch"
             continue
-        # A delivered later version invalidates even a recent query for that device.
+        # 一旦收到更新的节点版本号，该设备此前的读回样本即便尚未超时也立即失效。
         if (floors.get(nid, rev) > rev or (probe and
                 (probe["version"] > rev or (probe["sampled_at_ns"] >= sampled and probe["version"] != rev)))):
             node["status"] = "node_version_changed"
@@ -894,7 +894,7 @@ def _verify_order(work_id, saved, state, receipts, expected, operations):
 
 
 class _PacketAgents:
-    """Role endpoints see detached JSON and their immutable policy. Neither role owns a writer."""
+    """角色服务端点仅可见深拷贝 JSON 与不可变策略配置，OM 和 RC 均不直接持有设备写通道。"""
 
     def __init__(self, allowed, protected, headroom, chooser, network_foundation=None):
         self.chooser = chooser
@@ -947,7 +947,7 @@ class _PacketAgents:
             expected = diagnosis if received is None else dict(diagnosis, knowledgeContext=received["output"])
             if expected != p["diagnosis"] or not request["parent_message_id"]:
                 raise ValueError("RC cannot reproduce OM authority on this snapshot")
-            # The RC planner and selector receive the verified diagnosis sent by OM, with its knowledge.
+            # RC 规划器与选择器直接接收 OM 发出并经复核的诊断结论及配套知识。
             result = _resource(wid, state, model, ledger, config, p["diagnosis"], self.policy_hash,
                                self.chooser, received)
             if "reassessment_after_release" in p:
@@ -1002,7 +1002,7 @@ class _PacketAgents:
 
 
 class PacketRoles:
-    """Controller port for work-order planning and verification from received cache copies."""
+    """面向主控循环的工单规划与签收端口，输入全部取自已送达缓存副本。"""
 
     def __init__(self, allowed_ids, log, *, control_headroom_fraction=formula.DEFAULT_HEADROOM, protected_ids=(),
                  urls=None, run_id=None, chooser=None, network_foundation=None):
@@ -1019,7 +1019,7 @@ class PacketRoles:
         self._closed = False
 
     def release_authority(self, now_ns, links_snapshot, demands_snapshot, confirmed, retained_wire_bps, sid):
-        """Recheck the OM stop permit against delivered evidence immediately before dispatch."""
+        """在真正下发释放指令前，对照最新已送达观测再次复核 OM 的停源/释放授权。"""
         state = _state(now_ns, links_snapshot, demands_snapshot, confirmed, retained_wire_bps)
         allowed, protected = self._agents.scopes(state)
         model, ledger = _model(state, self._agents.headroom, allowed - protected)
@@ -1032,7 +1032,7 @@ class PacketRoles:
                 "refresh_required": row.get("requires_refresh", False), "snapshot_id": digest(state)}
 
     def planning_key(self):
-        """A stable identity for this runtime's immutable whitelist, method and budgets."""
+        """生成当前运行不可变白名单、决策方法与搜索预算的稳定规划指纹。"""
         return self._agents.policy_hash
 
     def _exchange(self, kind, wid, state, payload, parent=None):
@@ -1070,7 +1070,7 @@ class PacketRoles:
                        "configuration_evidence": "per_node_query_ttl_or_unchanged_fresh_version",
                        "protocol": om["protocol"], "binding": om["binding"], "sdk_version": om["sdk_version"],
                        "task_store": "separate_in_memory_per_role", "process_restart_recovery": False})
-        # Keep one scalar for no-change orders whose full snapshot is not archived.
+        # 对于无需变更且未归档完整快照的空转工单，保留单标量摘要即可。
         from competition_metrics import latest_input_arrival
         self._log({"event": "b03_plan_evidence_clock", "time_ns": now_ns, "work_id": wid,
                    "snapshot_id": plan["snapshot_id"], "fresh_arrival_ns": latest_input_arrival(state)})

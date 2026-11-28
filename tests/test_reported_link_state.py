@@ -1,4 +1,4 @@
-"""Only delivered reports can affect queue pressure and reported link health."""
+"""验证只有经网络送达的报告才能影响队列拥堵判定与上报链路健康度。"""
 from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace

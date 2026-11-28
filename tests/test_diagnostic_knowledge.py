@@ -1,4 +1,4 @@
-"""Synthetic, delivered work orders for opt-in knowledge, catalogue handoff and independent replay."""
+"""验证可选诊断知识、开局底图交接及独立回放核验的合成工单测试。"""
 from copy import deepcopy
 from hashlib import sha256
 import json
@@ -111,7 +111,7 @@ class DiagnosticKnowledge(unittest.TestCase):
 
     def test_native_frozen_tokenizer_receives_the_original_prompt_bytes(self):
         spec = json.loads((ROOT / "config/model.json").read_bytes())
-        # T141 golden prompts for this synthetic delivered state at the tokenizer boundary.
+        # T141 在该合成已送达状态下的分词边界黄金提示词参照。
         expected = {18: (2114, "8bb69fdff2c0dee71eb11c6134c1a7ca3d87ccf920493a385f28fbb82d260367"),
                     372: (3559, "abd2af9d70f420dd55eed802d1d604611f29dc8f326e20b114a5da60115092ef")}
         captured = []

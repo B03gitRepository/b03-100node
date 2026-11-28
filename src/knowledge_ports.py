@@ -1,4 +1,4 @@
-"""Work-order knowledge ports for callers that put only src/ on their import path."""
+"""兼容仅将 src/ 加入导入路径的调用方，转发工单知识端口函数。"""
 from pathlib import Path
 import sys
 

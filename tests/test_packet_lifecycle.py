@@ -1,4 +1,4 @@
-"""Exercise expiry and readmission with the pinned packet engine and real OM/RC endpoints."""
+"""基于锁定分组引擎与真实 OM/RC 端点，测试业务到期退场与再准入生命周期。"""
 from copy import deepcopy
 import json
 from pathlib import Path

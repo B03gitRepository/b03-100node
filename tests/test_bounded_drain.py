@@ -1,4 +1,4 @@
-"""Boundary, independent readback and recovery-selection checks for bounded work-order drain."""
+"""有界排空截止边界、独立读回及默认恢复策略切换的单元测试。"""
 from contextlib import redirect_stderr
 from copy import deepcopy
 from io import StringIO
@@ -107,7 +107,7 @@ class BoundedDrain(unittest.TestCase):
         self.assertEqual((delayed["status"], delayed["pendingReleaseIds"], delayed["continuingActiveIds"]),
                          ("incomplete", ["s"], []))
         self.assertEqual(delayed["unconfirmedDeviceEpochs"], [{"serviceId": "s", "epoch": 1}])
-        # A failed pre-dispatch check needs positive authority to retain the original config.
+        # 下发前复核失败时，须具备明确授权证据才可保留原配置。
         failed = [self.installed, self.open, skip, end]
         self.assertEqual(self.receipt(failed, active)["pendingReleaseIds"], ["s"])
         self.assertEqual(self.receipt([*failed, healthy], active)["status"], "complete")

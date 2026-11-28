@@ -1,4 +1,4 @@
-"""Independent, read-only configuration rounds on the existing native query channel."""
+"""复用原生只读查询通道，按业务独立推进并结算下发前的配置刷新轮次。"""
 
 
 class IndependentRefresh:
@@ -7,6 +7,7 @@ class IndependentRefresh:
         self.jobs = {}
         self.retry_at = {}
 
+    # 按业务拆分为独立的只读刷新任务，避免单条离线业务阻塞其余可达业务的读回结算。
     def start(self, now, work_id, targets):
         loop = self.loop
         for sid, target in targets.items():
@@ -22,6 +23,7 @@ class IndependentRefresh:
             for node in nodes:
                 loop._schedule_query(now, (sid, node), batch)
 
+    # 收到节点读回 ACK 后归入对应业务；该业务全部跳数收齐即刻独立结算。
     def receive(self, ack, now, node):
         sample = ack.get("b03_readback")
         if not isinstance(sample, dict) or not isinstance(sample.get("service_id"), str):
@@ -35,6 +37,7 @@ class IndependentRefresh:
             self._settle(sid, now)
         return True
 
+    # 每个控制节拍检查：1）失败业务的冷却到期或邻居恢复可达；2）进行中任务的超时与重发。
     def poll(self, now):
         loop = self.loop
         links = None
@@ -62,12 +65,14 @@ class IndependentRefresh:
             else:
                 loop._poll_query_waiters(batch, now)
 
+    # 若设备发生新写入或进入下发期联合复核，则作废旧只读刷新轮次并标记 superseded。
     def cancel(self, sid, now, reason):
         batch = self.jobs.pop(sid, None)
         self.retry_at.pop(sid, None)
         if batch:
             self._result(sid, now, batch, "superseded", reason)
 
+    # 单业务结算：仍严格校验每跳样本的 TTL 与节点版本号；过期则重查，通过后强制下一轮重新核权。
     def _settle(self, sid, now, *, expired=False):
         loop = self.loop
         batch = self.jobs[sid]

@@ -1,4 +1,4 @@
-"""Select the native-compatible packet provider and bind its actual engine release."""
+"""选择兼容原生接口的分组仿真适配器，并绑定实际生效的引擎版本。"""
 from __future__ import annotations
 
 from copy import deepcopy
@@ -33,7 +33,7 @@ def runtime_identity(registration, lock, blob):
 
 
 def archived_engine_lock(run, conditions, files, *, default_lock=None):
-    """Validate the portable receipt before optionally comparing the installed engine."""
+    """先校验便携回执中的引擎锁结构，再按需与本地已安装引擎逐文件比对。"""
     recorded = conditions.get("simulatorRuntime")
     registration = (conditions.get("components") or {}).get("simulator")
     if recorded is None:
@@ -66,7 +66,7 @@ def archived_engine_lock(run, conditions, files, *, default_lock=None):
 
 
 def simulation_type(components):
-    """Compose the host's measurement hooks with the selected native packet implementation."""
+    """将宿主的计量钩子组合挂载到所选的原生分组仿真实现上。"""
     from resnet_bridge import MeasuredSimulation, MeasurementMixin, public_type
     from resnet.simulation.simulation import Simulation
 
@@ -96,6 +96,6 @@ def simulation_type(components):
         raise ValueError("The simulator implementation identity differs from its component registration")
 
     class MeasuredProvider(MeasurementMixin, implementation):
-        """Run the provider's physical transitions with the shared business meter."""
+        """在合作方仿真提供方的物理状态转换之上叠加共享业务计量器。"""
 
     return MeasuredProvider

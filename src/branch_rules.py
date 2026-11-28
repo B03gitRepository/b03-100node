@@ -1,4 +1,4 @@
-"""Pure fixed-rule example. Search delivered residual links by bottleneck headroom and delay."""
+"""独立固定规则示例（工具 M）：在已送达的剩余链路中优先按瓶颈余量和时延选路。"""
 from copy import deepcopy
 from heapq import heappop, heappush
 

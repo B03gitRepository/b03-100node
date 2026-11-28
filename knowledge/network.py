@@ -1,4 +1,4 @@
-"""Select a versioned network and build the static reference delivered to the agents."""
+"""选择版本化场景网络，并构建交付给 OM/RC 的开局静态底图。"""
 from __future__ import annotations
 
 from collections import Counter, defaultdict
@@ -17,7 +17,7 @@ _UNDECLARED = {"allowedLinkTypes": None, "maxInterfaces": None}
 
 
 def check_resources(resources):
-    """The three public limits are also passed to the native packet engine."""
+    """校验这三项公开资源上限，并同步传给底层分组仿真引擎。"""
     if not isinstance(resources, dict) or set(resources) != _RESOURCE_FIELDS:
         raise ValueError("Network resources require queue_packets, queue_bytes and control_headroom_fraction")
     for name in ("queue_packets", "queue_bytes"):
@@ -68,7 +68,7 @@ def _load_custom_profile(directory):
 
 
 def resolve_network(project_root, network_id):
-    """Use only the caller's selected synthetic network. Official inputs remain external."""
+    """只加载调用方指定的仓内合成网络；官方场景数据始终保留在代码仓外。"""
     _check_id(network_id)
     catalog = (Path(project_root) / "knowledge/scenarios").resolve(strict=True)
     directory = (catalog / network_id).resolve(strict=True)
@@ -84,7 +84,7 @@ def resolve_network(project_root, network_id):
 
 
 def resolve_external(project_root, manifest=None):
-    """Only custom manifests can declare hardware limits. Official data has measured interfaces."""
+    """仅自建场景清单可声明节点硬件能力上限；外部官方场景只记录实测接口数。"""
     if manifest is not None:
         directory = Path(manifest).resolve(strict=True).parent
         catalog = (Path(project_root) / "knowledge/scenarios").resolve()
@@ -97,13 +97,13 @@ def resolve_external(project_root, manifest=None):
 
 
 def _qos(fields):
-    """Keep the five official QoS fields, normalizing the legacy spelling of bandwidth."""
+    """保留官方五项 QoS 字段，同时兼容旧版带宽字段拼写。"""
     capacity = fields["bandwidthBps"] if "bandwidthBps" in fields else fields["bandwitdhBps"]
     return {"bandwidthBps": capacity, **{key: fields[key] for key in _QOS_FIELDS}}
 
 
 def build_foundation(topology, initial_services, channel_profile, resources, node_capabilities):
-    """Build static nominal facts at startup. Never read event lists, activity or simulator state."""
+    """仅基于 0 秒开局配置生成静态底图，严禁读取后续事件脚本、活跃列表或仿真内部状态。"""
     constraints = check_resources(resources)
     profiles = _capabilities(node_capabilities, declared=False)
     effective = topology
@@ -133,7 +133,7 @@ def build_foundation(topology, initial_services, channel_profile, resources, nod
             raise ValueError(f"Topology requires {interfaces[nid]} interfaces at {nid}, limit is {limit}")
         nodes[nid] = {"nodeType": kind, "capabilities": deepcopy(capability),
                       "attachedLinkTypes": sorted(attached[nid]), "interfaceCount": interfaces[nid]}
-        # Keep the declared starting position separate from any later position report.
+        # 将声明的开局初始坐标与后续动态位置上报分开存放。
         for field in ("ip", "mask"):
             if field in raw:
                 nodes[nid][field] = raw[field]

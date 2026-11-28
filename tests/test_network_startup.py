@@ -1,4 +1,4 @@
-"""Network selection and runtime settings must agree with the agent's startup facts."""
+"""验证场景选择、运行时资源设置与 OM/RC 开局底图事实严格一致。"""
 from argparse import ArgumentParser, Namespace
 import json
 import os
@@ -57,7 +57,7 @@ class NetworkStartupTests(unittest.TestCase):
             check_startup_facts(run, cond, files, installed_root=root)
             with self.assertRaisesRegex(ValueError, "foundation selection"):
                 check_startup_facts(run, {**cond, "foundationEnabled": False}, files)
-            # Rebinding the edited archive cannot add a service that starts forty seconds later.
+            # 重新绑定修改后的归档，绝不能把 40 秒后才到达的未来业务提前塞进底图。
             facts["initialServices"]["GAUGE"] = dict(facts["initialServices"]["MAP"])
             fact_path = run / receipt["file"]
             fact_path.write_text(json.dumps(facts), encoding="utf-8")

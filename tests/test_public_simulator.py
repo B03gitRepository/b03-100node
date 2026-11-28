@@ -1,4 +1,4 @@
-"""The simulator extension receives detached records; probe scheduling stays bounded and causal."""
+"""验证仿真扩展只接收深拷贝记录，且探针调度严格受控并符合因果顺序。"""
 from copy import deepcopy
 from dataclasses import replace
 import json
@@ -89,7 +89,7 @@ class PublicPorts(unittest.TestCase):
             detect = detector.on_event
             def select_probes(event):
                 visible_batches.append(event)
-                # If either offline channel were exposed early, this stateful policy would cancel the probes.
+                # 若任一离线通道提前泄露，该有状态策略就会提前取消探针调度。
                 return [] if delivered else detect(event)
             detector.on_event = select_probes
             def watch(channel, callback):
@@ -139,7 +139,7 @@ class PublicPorts(unittest.TestCase):
                        "simulatorPorts": sim.ports.receipt()}
             verify_ports(run, conditions, summary, controller, executed, intervals)
             self.assertTrue(all(x > 0 for x in summary["simulatorPorts"]["callbacks"].values()))
-            # Custom archives name their topology by role, including on portable replay.
+            # 自建归档按角色命名拓扑文件，便携离线回放时同样遵守该约定。
             custom_topology = run / "input/topology/edges.json"
             custom_topology.parent.mkdir()
             (run / "input/net-topo.json").rename(custom_topology)

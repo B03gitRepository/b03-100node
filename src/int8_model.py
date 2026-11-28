@@ -1,4 +1,4 @@
-"""CPU inference with dynamically quantized Linear operators on the pinned frozen model."""
+"""基于锁定冻结模型的 CPU 动态 INT8（Linear 层量化）推理适配器。"""
 import platform
 import time
 
@@ -6,7 +6,7 @@ from frozen_policy import FrozenActor
 
 
 def quantize_linears(model, torch):
-    """Require every eligible Linear to be packed with qint8 weights and report its coverage."""
+    """要求所有符合条件的 Linear 层均完成 qint8 权重量化，并返回量化覆盖率统计。"""
     dynamic_linear = torch.ao.nn.quantized.dynamic.Linear
     linear = torch.nn.Linear
     shapes = {name: tuple(module.weight.shape) for name, module in model.named_modules()

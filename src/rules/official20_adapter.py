@@ -1,4 +1,4 @@
-"""Pure T091 official-current-state/role boundary. No Runtime, solver or model import."""
+"""T091 纯当前状态与角色边界适配层，不导入运行时、求解器或模型。"""
 import copy,hashlib,json,math
 SCHEMA="t119.official100-train-current-task.v1"
 CAPABILITY="b03.official100-live-role-adapter.t119.v1"
@@ -13,7 +13,7 @@ def active_ids(s):
     t=s["observedAtSec"]
     return sorted(k for k,r in s["requests"].items() if not r.get("_deleted",False) and r.get("startAtSec",0)<=t and (r.get("endAtSec") is None or t<r["endAtSec"]))
 def physical_key(s):
-    # Time alone may advance while a call runs. Lifecycles/active set cannot be erased.
+    # 仅允许仿真时钟随调用推进，严禁抹除既有的生命周期记录或活跃业务集合。
     return digest({"state":{k:v for k,v in s.items() if k!="observedAtSec"},"activeServiceIds":active_ids(s)})
 def bind_current(snapshot,config,authority,*,run_id,work_order_id,attempt,evidence_epoch,source,unknown_environment=False):
     require(set(snapshot)==SNAPSHOT_KEYS and len(snapshot["nodes"])==100,"OFFICIAL100_SNAPSHOT_SHAPE")
@@ -65,5 +65,5 @@ def candidate_scope(bound,current_bound,target):
     s=current_bound["snapshot"];require(set(target)==set(s["requests"]),"TARGET_SERVICE_SET")
     changed=sorted(k for k in target if target[k]!=s["assignments"][k])
     require(set(changed)<=set(bound["authority"]["executableServiceIds"]),"CANDIDATE_OUTSIDE_AUTHORIZATION")
-    # Existing Runtime.validate_plan + per-prefix submit_action remain mandatory.
+    # 既有的 Runtime.validate_plan 与逐前缀 submit_action 校验仍为强制关口。
     return {"changedServiceIds":changed,"scopePassed":True,"physicalGuardStillRequired":True,"configurationWriter":False}

@@ -1,4 +1,4 @@
-"""Apply explicitly scheduled demand ends to the native packet traffic batches."""
+"""将测试参数显式指定的业务结束时刻叠加到原生分组流量批次中。"""
 from dataclasses import replace
 
 import b03_formulas as formula
@@ -21,7 +21,7 @@ def parse_service_ends(values, specs, selected, start, end):
 
 
 def with_service_ends(scenario, ends):
-    """Use a native traffic_set. Demand reports, reservations, commands and queues are handled by the simulator."""
+    """构建供原生引擎使用的流量集合；业务状态上报、预留、指令与队列仍由仿真器统一处理。"""
     if not ends:
         return scenario
     deadlines = {sid: formula.seconds_to_us(sec) for sid, sec in ends.items()}

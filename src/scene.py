@@ -1,4 +1,4 @@
-"""Prepare official or versioned custom inputs for the same pinned packet engine."""
+"""为锁定的分组仿真引擎统一准备官方场景或版本化自建场景输入。"""
 from __future__ import annotations
 
 import hashlib
@@ -15,7 +15,7 @@ from scenario_manifest import archive_input, native_source_files, parse_json_byt
 ROOT = Path(__file__).resolve().parent.parent
 PROFILE = json.loads((ROOT / "config/profile.json").read_bytes())
 DEPENDENCY = json.loads((ROOT / "config/simulator.lock.json").read_bytes())
-# The first bundled release predated portable engine package metadata.
+# 首个内置引擎版本早于便携式引擎包元数据上线，此处做向后兼容。
 PREVIOUS_ENGINE_SHA256 = "910891e496a8c16e6b9ba134abab1e0cbd6b7dd95c31fbb5da7d3ad190b27e30"
 
 
@@ -43,7 +43,7 @@ def write_json(path, data):
 
 
 def archive_network_foundation(output, network, config, source_info, *, manifest=None):
-    """Give the agents the same initial inventory and effective limits used to construct the engine."""
+    """向 OM/RC 交付与构造仿真引擎完全一致的开局拓扑清单及生效资源上限。"""
     from knowledge.network import build_foundation
     resources = {"queue_packets": config["queue_packets"], "queue_bytes": config["queue_bytes"],
                  "control_headroom_fraction": config["control"]["control_headroom_fraction"]}
@@ -65,14 +65,14 @@ def archive_network_foundation(output, network, config, source_info, *, manifest
 
 
 def simulator_root(value=None):
-    """Resolve the CLI override, environment override or bundled packet engine."""
+    """按“命令行参数 > 环境变量 > 仓内内置引擎”的优先级定位仿真引擎目录。"""
     selected = value or os.environ.get("B03_SIMULATOR") or ROOT / "simulator/resnet_py"
     path = Path(selected).expanduser().resolve(strict=True)
     return path / "resnet_py" if (path / "resnet_py/src/resnet").is_dir() else path
 
 
 def validate_engine_lock(lock):
-    """Check the contents of a portable source lock without importing its engine."""
+    """无需导入仿真引擎，直接校验便携式引擎源码锁的文件清单与摘要。"""
     if not isinstance(lock, dict) or any(not isinstance(lock.get(k), str) or not lock[k].strip()
                                          for k in ("distribution", "version")):
         raise ValueError("The simulator lock requires a distribution and a version")
@@ -99,10 +99,10 @@ def validate_engine_lock(lock):
 
 
 def verify_engine(path, lock=None):
-    """Check declared bytes and, for a selected lock, inventory importable source."""
+    """核验声明的引擎文件字节；若指定自定义锁，一并盘点所有可导入源码文件。"""
     path = Path(path).resolve(strict=True)
     if lock is None:
-        lock = DEPENDENCY  # Historical receipts used the checkout's accepted lock.
+        lock = DEPENDENCY  # 历史回执沿用当时代码仓已验收的引擎锁。
     else:
         validate_engine_lock(lock)
         source = path / "src"
@@ -162,10 +162,10 @@ def has_bundled_data(engine, script):
 
 
 def _load_local(engine, output, control, *, input_folder="input", resources=None):
-    """Use the pinned engine's config merge, native schema validation and ScenarioSpec builder."""
+    """复用锁定引擎自身的配置合并、原生 schema 校验与 ScenarioSpec 构建流程。"""
     from resnet.application.config import load_config
     shutil.copyfile(engine / "configs/common.json", output / "native-common.json")
-    # Install the selected resource limits before the native engine validates its configuration.
+    # 在原生引擎校验配置之前，先注入本次选定的资源上限参数。
     options = {"control": dict(control)}
     if resources:
         options.update(queue_packets=resources["queue_packets"], queue_bytes=resources["queue_bytes"])
@@ -177,7 +177,7 @@ def _load_local(engine, output, control, *, input_folder="input", resources=None
 
 
 def _prepare_channel(output, profile_id):
-    """Validate the original native scene, then build the input the packet engine will run."""
+    """先校验原始原生场景合法性，再按所选信道模型生成交付引擎的实际输入。"""
     from knowledge.channels.model import project_channel_inputs, read_edition
     from resnet.io import load_scenario
 
@@ -218,7 +218,7 @@ def _prepare_custom(engine, manifest_path, output, resources=None, channel_selec
         target = local / name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, target)
-    # Explicit nulls disable the official topology's parallel-link defaults.
+    # 显式置空以关闭官方拓扑的平行链路默认合并逻辑。
     control = {"control_primary_link": None, "control_backup_link": None, **manifest["control"]}
     profile = selected_channel(manifest, channel_selection)
     folder = _prepare_channel(output, profile) if profile is not None else "input"
@@ -238,7 +238,7 @@ def _prepare_custom(engine, manifest_path, output, resources=None, channel_selec
 
 def prepare(engine, data, script, output, *, manifest_path=None, resources=None, channel_selection=None,
             archive_bundled_config=False):
-    """Bind archived bytes to the selected input contract before running any packet events."""
+    """在推进任何分组事件之前，将归档输入字节与当前输入契约完成绑定校验。"""
     from resnet.application.config import load_config
     if manifest_path is not None:
         if data is not None or script is not None:
@@ -263,7 +263,7 @@ def prepare(engine, data, script, output, *, manifest_path=None, resources=None,
         if archive_bundled_config:
             shutil.copyfile(engine / "configs/common.json", output / "native-common.json")
             shutil.copyfile(engine / "configs/official20.json", output / "native-experiment.json")
-        # The auditor always uses the original three files that actually supplied this run.
+        # 离线审计始终使用实际驱动本次运行的原始三份输入文件。
         raw = official_bytes(scenario_dir, script)
         signed_inputs(raw, script)
         local = output / "input"

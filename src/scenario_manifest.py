@@ -1,4 +1,4 @@
-"""Read the experiment manifest and resolve the files that belong to a scenario."""
+"""解析实验场景清单，定位属于该场景的全部输入与参考文件。"""
 from __future__ import annotations
 
 import json
@@ -15,7 +15,7 @@ def check_channel_id(key):
 
 
 def selected_channel(manifest, override=None):
-    """Resolve a manifest declaration or an explicit CLI override saved in the receipt."""
+    """解析清单声明的默认信道版本，或命令行显式指定的覆盖版本（同步写入回执）。"""
     if override is None:
         return manifest.get("channelProfile")
     if not isinstance(override, dict) or set(override) != {"source", "profile"} or override["source"] != "cli":
@@ -27,7 +27,7 @@ def selected_channel(manifest, override=None):
 
 
 def preset_member(name):
-    """Only an ID can select a knowledge configuration maintained in the project."""
+    """仅允许通过已登记的预设编号选取项目内置知识配置。"""
     if not isinstance(name, str) or not re.fullmatch(r"knowledge-[a-z0-9][a-z0-9_-]{0,53}", name):
         raise ValueError("knowledgePreset must be a local knowledge-* preset ID")
     return f"config/{name}.json"
@@ -54,12 +54,12 @@ def parse_json_bytes(raw):
 
 
 def read_custom_manifest(path):
-    """Read the experiment defaults; physical nodes, traffic and events live in the native files."""
+    """读取自建场景的默认实验参数；物理节点、流量与事件仍存放在原生场景文件中。"""
     return parse_custom_manifest(Path(path).read_bytes())
 
 
 def resolve_manifest_reference(project_root, path):
-    """Resolve the short references kept at older example manifest paths."""
+    """兼容解析旧示例清单路径中使用的简写文件引用。"""
     path = Path(path).resolve(strict=True)
     obj = parse_json_bytes(path.read_bytes())
     if not isinstance(obj, dict) or obj.get("schema") != "b03.network-reference.v1":
@@ -109,7 +109,7 @@ def parse_custom_manifest(raw):
 
 
 def native_source_files(config):
-    """Return the native inputs that must travel with a custom run, including optional references."""
+    """返回随自建运行一起归档的原生输入文件清单（含可选参考时间线）。"""
     if not isinstance(config, dict) or config.get("official_dataset", False) is not False:
         raise ValueError("A custom scenario cannot declare official dataset identity")
     files = config.get("files")
@@ -141,7 +141,7 @@ def native_source_files(config):
 
 
 def archive_input(directory, role, conditions, *, effective=False):
-    """Locate a native input by role, including official receipts saved without a role map."""
+    """按文件角色定位归档中的原生输入，兼容未记录角色映射的旧版官方回执。"""
     directory = Path(directory)
     origin = conditions.get("sceneOrigin", "official")
     if origin == "custom":

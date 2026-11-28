@@ -1,4 +1,4 @@
-"""Regression vectors for both published scales and the sealed formula contract."""
+"""面向 20/100 双规模及封存公式契约的数值回归测试向量。"""
 import json
 import sys
 import unittest

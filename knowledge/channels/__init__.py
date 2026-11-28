@@ -1,1 +1,1 @@
-"""Channel editions and their scenario projection."""
+"""版本化信道噪声模型及其场景参数折算模块。"""

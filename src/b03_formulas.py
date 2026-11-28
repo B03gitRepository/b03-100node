@@ -1,7 +1,7 @@
-"""Version-bound B03 calculations shared by controllers, rules, meters and verifiers.
+"""由主控、规则求解器、计量器与离线核验器共用的版本化 B03 核心计算口径。
 
-Only the standard library is required. The edition is bound once on import.
-The locked simulator remains an independent reference for its own profile.
+仅依赖 Python 标准库，导入时即绑定当前公式版本；
+锁定的分组仿真引擎仍作为其自身口径的独立参照。
 """
 from collections import Counter
 from copy import deepcopy
@@ -81,7 +81,7 @@ def ns_to_ms(ns):
 
 
 def archived_ns_to_ms(ns):
-    # The packet verifier historically converted the numerator to binary64.
+    # 分组核验器历史上将分子转为 binary64 浮点计算，此处沿用原口径。
     return ns / FLOAT_NS_PER_MS
 
 
@@ -119,7 +119,7 @@ _bandwidth = itemgetter("bandwidthBps")
 
 
 def path_metrics(parts):
-    """B03 proposal metrics, using the rule edition’s capped BER."""
+    """计算 B03 规则提案的路径指标（沿用规则版的 BER 上限截断口径）。"""
     if type(parts) not in (list, tuple):
         parts = list(parts)
     ber = sum(map(_bit_error, parts))
@@ -131,19 +131,19 @@ def path_metrics(parts):
 
 
 def packet_quality(service, path_links, links, *, qos_profile):
-    """Use the locked engine operation, including native units and the raw BER sum."""
+    """按锁定仿真引擎的原生单位及未截断 BER 累加口径计算路径质量。"""
     from resnet.control.policy import _quality
     return _quality(service, path_links, links, WIRE_BYTES, qos_profile=qos_profile)
 
 
 def extend_path(delay, jitter_sq, ber, delivery, link):
-    """Partial route in heap searches. Keep squared jitter and survival until comparison."""
+    """在堆搜索中扩展局部路径，保留抖动平方和与存活概率直至最终比较。"""
     return (delay + link["delayMs"], jitter_sq + link["jitterMs"]**2,
             min(BER_CEILING, ber + link["ber"]), delivery * (1.0-link["packetLossRate"]))
 
 
 def widest_rule_jitter(squared):
-    """Preserve the independently registered widest-path rule's power rounding."""
+    """保持独立注册的最大剩余带宽规则（M）原有的幂次舍入口径。"""
     return squared ** _WIDEST_JITTER_ROOT
 
 
@@ -214,7 +214,7 @@ def online_pair_count(online_count):
 
 
 def elapsed_ns(start, end):
-    """A missing delivered endpoint leaves the timing sample unobserved."""
+    """计算起止时刻间隔；若任一端已送达时间缺失则返回空值（未观测到）。"""
     return None if start is None or end is None else end - start
 
 

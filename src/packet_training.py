@@ -1,4 +1,4 @@
-"""Run and verify a bounded online PPO update on authorized packet work orders."""
+"""在获准的分组工单上执行有界在线 PPO 更新，并校验检查点恢复一致性。"""
 from __future__ import annotations
 
 import argparse
@@ -57,7 +57,7 @@ def measured_u(rows, start, end):
 
 
 def samples_from_work_orders(actual, control, report):
-    """Credit actual in-window draws against original same-condition fixed-I intervals."""
+    """以同条件固定工具 I 的原区间结果为参照，核算窗内真实采样决策的收益。"""
     a, b = (read_json(d / "CONDITIONS.json") for d in (actual, control))
     matched = ("nodeCount", "script", "sourceHashes", "releaseManifestSha256", "originalConfigSha256",
                "simulation", "services", "officialDefinitions", "authority", "mode", "dropInstallAckAtDestination")
@@ -93,7 +93,7 @@ def samples_from_work_orders(actual, control, report):
 
 
 def run_episode(directory, options, manifest, policy, on_policy_ready=None):
-    """Use the standard simulator, OM/RC, device writes, readbacks and archive verifier."""
+    """完整走标准分组仿真器、OM/RC、设备写入、逐跳读回与离线归档核验流程。"""
     from cli import main
     args = ["run", "--policy", policy, "--components", str(manifest),
             "--script", options["script"], "--services", options["services"],
@@ -165,7 +165,7 @@ def one_round(args, root):
             raise ValueError("Completed round conflicts with its supplied request or replay history")
         return receipt
     if len(chain) == n:
-        # Recover an interruption after the atomic journal commit without resampling.
+        # 若在原子日志提交之后意外中断，直接从日志恢复而不重新采样。
         prepared = read_json(prepared_path)
         if prepared["options"] != options:
             raise ValueError("The committed round used different options")
@@ -241,7 +241,7 @@ def restore_round(args, root):
 
 
 def data_locations(value):
-    """Identify the data asset inside either supported outer dataset layout."""
+    """在两种受支持的外置数据集目录布局中自动定位官方数据文件。"""
     src = Path(value).expanduser().resolve(strict=True)
     if src.is_dir() and not (src / "net-topo.json").is_file():
         for collection in (src / "data", src):
@@ -260,7 +260,7 @@ def check_output_paths(outputs, assets):
 
 
 def training_workspace(args):
-    """Resolve inputs and output destinations before creating directories or lock files."""
+    """在创建工作目录或锁文件前，预先解析并校验所有输入和输出路径。"""
     root = args.workspace.expanduser().resolve()
     assets = {Path(p).expanduser().resolve(strict=True) for p in (args.checkpoint, args.tokenizer)}
     base = f"round-{args.round:03d}"
@@ -288,9 +288,9 @@ def training_workspace(args):
         if (receipt["snapshot"] != base + "-replay.json" or
                 not (root / receipt["snapshot"]).resolve().is_relative_to(root)):
             raise ValueError("The restore receipt must select this workspace's committed replay")
-        # New receipts also remember the input paths after a component manifest moves or changes.
+        # 新版回执会同时记住原始输入路径，防止组件清单移动或改名后找不到依赖。
         assets.update(Path(path).resolve() for path in receipt.get("componentInputPaths", ()))
-        # Resolve available manifest layers for older receipts, even when another input has moved.
+        # 兼容旧版回执：即使某个外部输入已迁移，仍尽量解析可用的清单层级。
         for key in ("data", "simulator", "checkpoint", "tokenizer", "components"):
             value = receipt.get("options", {}).get(key)
             if not value:
@@ -317,20 +317,20 @@ def training_workspace(args):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest="command", required=True)
-    run = sub.add_parser("step", help="Sample a new work order and commit one real PPO update")
-    restore = sub.add_parser("restore", help="Verify every parameter and the next sampled action")
+    run = sub.add_parser("step", help="采样一轮新工单并提交一步真实在线 PPO 参数更新")
+    restore = sub.add_parser("restore", help="新进程恢复检查点，逐字节校验全部参数并复现下一次动作采样")
     for command in (run, restore):
         command.add_argument("--workspace", type=Path, required=True)
         command.add_argument("--round", type=int, required=True)
-        command.add_argument("--checkpoint", type=Path, required=True, help="Pinned v374 base directory")
+        command.add_argument("--checkpoint", type=Path, required=True, help="锁定的 v374 基座权重目录")
         command.add_argument("--tokenizer", type=Path, required=True)
         command.add_argument("--device", choices=["cpu", "cuda"], default="cuda")
     run.add_argument("--components", type=Path, default=ROOT / "config/packet-ppo.json")
     run.add_argument("--script", choices=["04", "05"], required=True)
     run.add_argument("--simulator", default=os.environ.get("B03_SIMULATOR") or None,
-                     help="Read-only resnet_py release (default: B03_SIMULATOR or simulator/resnet_py)")
+                     help="只读 resnet_py 仿真引擎目录（默认优先取 B03_SIMULATOR，否则用仓内 simulator/resnet_py）")
     run.add_argument("--data", type=Path, default=os.environ.get("B03_DATA") or None)
-    run.add_argument("--services", required=True, help="Original service IDs separated by commas, or all")
+    run.add_argument("--services", required=True, help="逗号分隔的原始业务编号列表，或填 all")
     run.add_argument("--start", type=int, required=True)
     run.add_argument("--end", type=int, required=True)
     run.add_argument("--drain", type=int, required=True)

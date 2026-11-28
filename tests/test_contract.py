@@ -1,4 +1,4 @@
-"""Source-only regressions. Native end-to-end runs are documented in README.md."""
+"""纯源码级契约回归测试（完整原生端到端运行说明见 README.md）。"""
 from pathlib import Path
 import sys
 import unittest

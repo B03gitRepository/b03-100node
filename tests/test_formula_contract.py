@@ -1,4 +1,4 @@
-"""Cross-contract and deployment regressions for the normative formula edition."""
+"""验证规范公式版跨契约与跨部署环境的一致性回归测试。"""
 import itertools
 import json
 import math
@@ -77,8 +77,8 @@ class BoundaryTests(unittest.TestCase):
         squared = 886927.0226647181
         limit = dict(delayMs=0, jitterMs=math.sqrt(squared) - formula.EPS, ber=0, packetLossRate=0)
         state = (0, squared, 0, 1)
-        # libm may return equal rounded roots on some platforms. Compare to that
-        # platform's original T140 operations, including their threshold.
+        # 不同平台的 libm 平方根舍入可能略有差异，此处与当前平台
+        # 原始 T140 运算及容差阈值做同口径比对。
         threshold = limit["jitterMs"] + formula.EPS
         self.assertEqual(formula.exceeds_qos(state, limit, formula.EPS, jitter_root=formula.widest_rule_jitter),
                          squared**.5 > threshold)

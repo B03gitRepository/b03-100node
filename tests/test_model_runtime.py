@@ -1,4 +1,4 @@
-"""Regression checks for complete model inputs, exercised INT8 operators and measured U returns."""
+"""验证完整超限输入编码、INT8 量化算子实测及未加权 U 回报核算的回归测试。"""
 from copy import deepcopy
 import json
 from pathlib import Path
@@ -144,7 +144,7 @@ class ModelRuntime(unittest.TestCase):
             self.assertEqual(args.data, engine.parent)
             self.assertEqual(args.simulator, engine.parent)
             self.assertFalse(sibling.exists())
-            # An outer directory may hold both inputs and outputs. A named output must still avoid them.
+            # 外层目录可能同时存放输入与输出，指定输出路径时仍须避开已有文件。
             self.assertEqual(training_workspace(SimpleNamespace(**kwargs, workspace=root)), root)
             collision = root/"attempts"
             collision.mkdir()
@@ -182,12 +182,12 @@ class ModelRuntime(unittest.TestCase):
                     with self.subTest(route=route[0], dest=dest), patch.object(
                             sys, "argv", ["train.py", *route, *shared]), self.assertRaisesRegex(ValueError, "read-only"):
                         training_main()
-            # A legacy receipt can still resolve sibling assets if the knowledge source has moved.
+            # 即使知识源文件位置变动，旧版回执仍应能定位同级资产。
             knowledge.rename(root / "moved-edition.json")
             restore = ["train.py", "restore", "--workspace", str(work), "--report", str(fresh), *shared]
             with patch.object(sys, "argv", restore), self.assertRaisesRegex(ValueError, "read-only"):
                 training_main()
-            # New receipts retain the input set even if the original manifest is gone.
+            # 即使原清单文件已删除，新版回执仍保留完整输入集合记录。
             receipt["componentInputPaths"] = [str(attachment.parent)]
             receipt_path.write_text(json.dumps(receipt), encoding="utf8")
             manifest.rename(root / "moved-registration.json")
@@ -212,7 +212,7 @@ class ModelRuntime(unittest.TestCase):
                 training_main()
             self.assertFalse(report.parent.exists())
             self.assertFalse((work/"round-001-replay.json.lock").exists())
-            # An archived caller could have supplied the containing packet bundle as its data argument.
+            # 归档调用方可能直接将外层完整数据包目录作为 --data 参数传入。
             official = root / "data/scenarios" / __import__("packet_training").PROFILE["officialScenario"]
             official.mkdir(parents=True)
             (official/"net-topo.json").write_bytes(b"original")

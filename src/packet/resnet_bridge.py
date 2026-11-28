@@ -1,4 +1,4 @@
-"""Map the native resnet implementation onto the B03 clock, observation, device and meter ports."""
+"""将原生 resnet_py 仿真引擎桥接到 B03 的时钟、观测、设备执行与计量端口。"""
 from collections import Counter
 from copy import deepcopy
 from functools import partial
@@ -16,7 +16,7 @@ from packet_device_readback import rule_fields
 
 
 def validate_install_choice(choice, service, links, now, qos_profile):
-    """Validate a full native payload and original five QoS limits at the final controller gate."""
+    """在主控最终下发关口校验原生完整业务载荷速率与五项原始 QoS 上限。"""
     validate_policy_result({"decided_at_ns": now, "decisions": [choice]}, service, links, now_ns=now)
     if not choice["accepted"] or choice["reserved_bps"] != service.required_bps:
         raise ValueError("original_full_payload_rate_required")
@@ -27,7 +27,7 @@ def validate_install_choice(choice, service, links, now, qos_profile):
 
 
 class ReportingExecutor:
-    """Delegate all commands to the original executor; sample only a successful local query."""
+    """将全部指令委托给原生节点执行器，仅在本地只读查询成功时附带采样设备转发状态。"""
 
     def __init__(self, executor, read_local):
         self.executor = executor
@@ -52,13 +52,13 @@ class ReportingExecutor:
         if ack["status"] == "applied" or (
             ack["status"] == "duplicate" and ack["original_status"] == "applied"
         ):
-            # A duplicate replays the first sample, including its original clock and packet UID.
+            # 重复到达的查询指令直接重放首次采集的样本及其原始时钟与分组编号。
             ack["b03_readback"] = deepcopy(self.samples[cid])
         return ack
 
 
 class ControlPort:
-    """The work order receives only delivered caches and the single packet command transmitter."""
+    """向工单循环暴露的受限控制端口：仅提供已送达观测缓存和唯一分组指令发送器。"""
 
     def __init__(self, controller):
         self.link_reports = SimpleNamespace(snapshot=controller.link_reports.snapshot)
@@ -87,7 +87,7 @@ def installed_path(sim, sid):
 
 
 def attach_device_readers(sim):
-    """Build one read-only port per node before the simulator advances."""
+    """在仿真时钟首次推进前，为每个节点挂接本地只读状态采集器。"""
 
     def port(node, executor):
         def read(sid, epoch):
@@ -116,7 +116,7 @@ def attach_device_readers(sim):
 
 
 def bind_work_loop(sim, roles, emit, *, defer_unreachable_cleanup=True):
-    """Attach the adapter immediately after Simulation construction, before the first advance."""
+    """在 Simulation 构造完成后、首次推进时钟前立即绑定工单执行循环。"""
     from packet_device import WorkLoop
     control = sim.control
     if (sim.config.get("mode") != "control" or control is None or sim.now != 0
@@ -132,7 +132,7 @@ def bind_work_loop(sim, roles, emit, *, defer_unreachable_cleanup=True):
 
 
 class MeasurementMixin:
-    """Observe native transitions. A named receive fault is optional in a separate run."""
+    """混入类：观测原生事件与状态转换，并支持在测试回合中按需注入单次收包故障。"""
     def __init__(self, *args, drop_install_ack=False, **kwargs):
         self.meter = None
         self._meter_at = None
@@ -196,11 +196,11 @@ class MeasurementMixin:
 
 
 class MeasuredSimulation(MeasurementMixin, Simulation):
-    """The accepted native packet simulator with the shared business meter."""
+    """附带共享业务计量器的标准原生分组仿真类。"""
 
 
 class PublicSimulation(MeasurementMixin, Simulation):
-    """Native engine behind the four public data ports."""
+    """对外暴露四类纯数据回调端口的分组仿真包装类。"""
 
     def __init__(self, *args, port_provider=None, **kwargs):
         self.ports = Ports(port_provider)
@@ -246,7 +246,7 @@ class PublicSimulation(MeasurementMixin, Simulation):
                 nodes.update(endpoints)
         if not changes:
             return
-        # Number visible link batches only. A hidden demand-only batch cannot signal the policy via timing or sequence.
+        # 仅对可见链路变化批次递增序号；纯隐藏需求批次不得通过时序或序号向策略泄密。
         event = {"sequence": self.ports.counts["event"] + 1, "timeNs": now, "changes": changes,
                  "probeNodes": sorted(nodes), "remainingNs": self.end_ns - now}
         for node, delay in self.ports.event(event):

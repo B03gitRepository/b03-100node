@@ -1,4 +1,4 @@
-"""Host translation for the plain-data rule patch contract."""
+"""纯数据规则补丁契约（b03.rules.patch.v2）的主控侧格式转换与校验层。"""
 from copy import deepcopy
 import json
 import math
@@ -113,7 +113,7 @@ def materialize(msg, reply):
 
 
 def check_final(msg, target):
-    """Apply the same externally observable limits after opening or packet-QoS adjustment."""
+    """在首单补接或分组 QoS 调整之后，再次套用相同的外部可见约束做终检。"""
     initial = msg["snapshot"]["assignments"]
     if set(initial) != set(target):
         raise ValueError("The final rule proposal changed the roster")

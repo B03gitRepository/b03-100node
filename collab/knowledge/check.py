@@ -1,4 +1,4 @@
-"""Exercise a ranked ID provider against a synthetic edition. Standard library only."""
+"""使用合成知识版离线自测知识检索组件（仅依赖 Python 标准库）。"""
 import argparse
 from copy import deepcopy
 import importlib.util
@@ -9,6 +9,7 @@ HERE = Path(__file__).resolve().parent
 DEFAULT = HERE.parents[1]/"src"/"collab_ranked_knowledge.py"
 
 
+# 自测流程：加载知识插件 -> 核对精确 ID 查询 -> 核对主题召回排序与去重 -> 输出规范化结果。
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--provider",type=Path,default=DEFAULT)
