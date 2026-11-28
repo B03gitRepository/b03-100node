@@ -6,6 +6,7 @@ import json
 import math
 from bisect import bisect_right
 from collections import defaultdict
+from copy import deepcopy
 from pathlib import Path
 
 from episode_contract import TRAIN_SCRIPTS, _verified, trajectory
@@ -13,6 +14,21 @@ from foundation_policy import (FEATURES, FoundationFeatures, initial_parameters,
                                read_parameters, write_parameters)
 from knowledge.agent_facts import evidence_digest
 from scene import PROFILE
+
+
+def paired_conditions(conditions):
+    """Retain physical, software, policy and authority identities across independent draws."""
+    normalized = deepcopy(conditions)
+    # The verifier authenticates each complete manifest before this comparison.
+    # Only the two sampler seeds and the three digests derived from them may differ.
+    components = normalized["components"]
+    components["model"]["options"].pop("drawSeed", None)
+    components.pop("manifestSha256")
+    normalized["rcPolicy"].pop("workOrderComponentsSha256")
+    proof = normalized["provenance"]
+    proof["activeComponents"]["model"]["options"].pop("drawSeed", None)
+    proof.pop("fingerprint")
+    return evidence_digest(normalized)
 
 
 def load_rollout(path, parameters):
@@ -59,9 +75,7 @@ def load_rollout(path, parameters):
         ends.append(row["end_ns"])
         counts.append(len(row["unmet"]))
         prefix.append(prefix[-1] + row["U_service_ns"])
-    key = evidence_digest({k:cond.get(k) for k in ("scene","services","authority","simulation",
-                          "sourceHashes","networkFoundation","deferredCleanup","initialAdmission","formulaBinding",
-                          "releaseManifestSha256")})
+    key = paired_conditions(cond)
     return dict(result=result, key=key, ends=ends, prefix=prefix, counts=counts, run=run,
                 digest=report["verification"]["archiveIndexSha256"], seed=(cond["components"]["model"]
                 .get("options",{}).get("drawSeed",0)))

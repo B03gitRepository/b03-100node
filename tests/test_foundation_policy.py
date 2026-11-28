@@ -1,3 +1,4 @@
+from copy import deepcopy
 from pathlib import Path
 import sys
 import tempfile
@@ -6,7 +7,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "src")]
 from foundation_policy import FoundationActor, initial_parameters, probabilities, write_parameters
-from foundation_training import update
+from foundation_training import paired_conditions, update
 from knowledge.agent_facts import evidence_digest
 
 
@@ -72,3 +73,28 @@ class FoundationPolicyTest(unittest.TestCase):
         self.assertEqual(probabilities(after["weights"],x,["I"]),{"I":1.0})
         with self.assertRaises(ValueError):
             update(before,[(x,"B",0.5,["B","I"],0)])
+
+    def test_pairing_requires_the_same_device_rule_scope_and_policy(self):
+        base = {"components":{"model":{"options":{"drawSeed":1}}, "rules":{"version":1},
+                              "catalog":{"symbols":["B","I"]},"manifestSha256":"manifest-a"},
+                "rcPolicy":{"initialAdmission":"residual","workOrderComponentsSha256":"components-a"},
+                "provenance":{"activeComponents":{"model":{"options":{"drawSeed":1}}},
+                              "fingerprint":"proof-a","providers":{"model":{"entrySha256":"a"}}},
+                "deviceRecovery":{"enabled":False}, "authority":{"discovery":"all_delivered_registered"}}
+        other = deepcopy(base)
+        other["components"]["model"]["options"]["drawSeed"] = 2
+        other["provenance"]["activeComponents"]["model"]["options"]["drawSeed"] = 2
+        other["components"]["manifestSha256"] = "manifest-b"
+        other["rcPolicy"]["workOrderComponentsSha256"] = "components-b"
+        other["provenance"]["fingerprint"] = "proof-b"
+        self.assertEqual(paired_conditions(base), paired_conditions(other))
+        for path, value in [(("deviceRecovery","enabled"),True), (("rcPolicy","initialAdmission"),"audit"),
+                            (("components","rules","version"),2), (("authority","discovery"),"explicit_roster"),
+                            (("components","catalog","symbols"),["A","B","I"]),
+                            (("provenance","providers","model","entrySha256"),"b")]:
+            changed = deepcopy(other)
+            parent = changed
+            for key in path[:-1]:
+                parent = parent[key]
+            parent[path[-1]] = value
+            self.assertNotEqual(paired_conditions(base), paired_conditions(changed))
